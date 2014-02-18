@@ -1,7 +1,7 @@
 {
   "AWSTemplateFormatVersion" : "2010-09-09",
 
-  "Description" : "(0001) - This template creates a VPC infrastructure for a multi-AZ, multi-tier deployment of a Windows based Application infrstructure. It installs 2 Active Directory Domain Controllers into subnets in seperate AZs inside a VPC, as well as Remote Desktop Gateway and NAT instances into the DMZ for each Availability Zone. The default Domain Administrator password will be the one retrieved from the instance.  For adding members to the domain, ensure that they are launched into the domain member security group created by this template and then configure them to use the AD instances fixed private IP addresses as the DNS server. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
+  "Description" : "(0002) - This template creates a VPC infrastructure for a multi-AZ, multi-tier deployment of a Windows based Application infrstructure. It installs 2 Windows Server instances into subnets in seperate AZs inside a VPC, as well as Remote Desktop Gateway and NAT instances into the DMZ for each Availability Zone. After extending your on-premises network to the VPC, you can promote the Windows Server instances to Domain Controllers in your AD forest. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
 
   "Parameters" : {
 
@@ -34,22 +34,6 @@
 			"AllowedValues" : [ "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m3.xlarge", "c1.medium", "c1.xlarge"]
 		},
 
-		"DomainDNSName" : {
-			"Description" : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.com",
-			"Type" : "String",
-			"Default" : "contoso.com",
-			"MinLength" : "3",
-			"MaxLength" : "25",
-			"AllowedPattern" : "[a-zA-Z0-9]+\\..+"
-		},
-		"DomainNetBIOSName" : {
-			"Description" : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. CORP",
-			"Type" : "String",
-			"Default" : "contoso",
-			"MinLength" : "1",
-			"MaxLength" : "15",
-			"AllowedPattern" : "[a-zA-Z0-9]+"
-		},
 		"ServerNetBIOSName1" : {
 			"Description" : "NetBIOS name of the 1st AD Server (upto 15 characters)",
 			"Type" : "String",
@@ -66,37 +50,6 @@
 			"MaxLength" : "15",
 			"AllowedPattern" : "[a-zA-Z0-9]+"
 		},		
-		"RestoreModePassword" : {
-			"Description" : "Password for a separate Administrator account when the domain controller is in Restore Mode. Must be at least 8 characters containing letters, numbers and symbols",
-			"Type" : "String",
-			"MinLength" : "8",
-			"MaxLength" : "32",
-			"AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
-			"NoEcho" : "True",
-			"Default" : "Password123"
-		},
-		"DomainAdminUser" : {
-			"Description" : "User name for the account that will be added as Domain Administrator. This is separate from the default \"Administrator\" account",
-			"Type" : "String",
-			"Default" : "StackAdmin",
-			"MinLength" : "5",
-			"MaxLength" : "25",
-			"AllowedPattern" : "[a-zA-Z0-9]*"
-		},
-		"DomainAdminPassword" : {
-			"Description" : "Password for the domain admin user. Must be at least 8 characters containing letters, numbers and symbols",
-			"Type" : "String",
-			"MinLength" : "8",
-			"MaxLength" : "32",
-			"AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
-			"NoEcho" : "true",
-			"Default" : "Password123"
-		},
-		"UserCount" : {
-			"Description" : "Total number of test user accounts to create in Active Directory",
-			"Type" : "Number",
-			"Default" : "25"
-		},
 						
 		"AZ1" : {
 			"Description" : "Name of 1st Availability Zone that will contain public & private subnets - Select a valid Zone for your region",
@@ -245,13 +198,10 @@
 		"ContosoDhcpOptions" : {
 			"Type" : "AWS::EC2::DHCPOptions",
 			"Properties" : {
-				"DomainName" : { "Ref" : "DomainDNSName"},
 				"DomainNameServers" : ["AmazonProvidedDNS"],
 				"NtpServers" : [{ "Ref" : "AD1PrivateIp"}],
 				"NetbiosNameServers" : [{ "Ref" : "AD1PrivateIp"},{ "Ref" : "AD2PrivateIp"}],
-				"NetbiosNodeType" : "2",
-				"Tags" : [
-					{"Key" : "Domain", "Value" : { "Ref" : "DomainDNSName"}}]
+				"NetbiosNodeType" : "2"
 			}
 		},
 		"VPC" : {
@@ -535,7 +485,7 @@
                 "AWS::CloudFormation::Init" : {
                     "configSets" : {
                         "config" : [
-                            "setup", "rename", "installADDS", "configureSites", "reboot", "finalize"
+                            "setup", "rename", "finalize"
                         ]
                     },
                     "setup"      : {
@@ -607,142 +557,6 @@
 							}
 						}
 					},
-					"installADDS" : {
-						"commands" : {
-							"1-install-prereqs" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy -Command \"Install-WindowsFeature AD-Domain-Services, rsat-adds -IncludeAllSubFeature\""
-								]]},
-								"waitAfterCompletion" : "0"						
-							},
-							"2-install-adds" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
-									"\"Install-ADDSForest -DomainName ", { "Ref" : "DomainDNSName" }, " ",
-									"-SafeModeAdministratorPassword (convertto-securestring ", { "Ref" : "DomainAdminPassword" }, " -asplaintext -force) ",
-									"-DomainMode Win2012 ",
-									"-DomainNetbiosName ", { "Ref" : "DomainNetBIOSName" } , " ",
-									"-ForestMode Win2012 ",
-									"-Confirm:$false ",
-									"-Force\""
-								]]},
-								"waitAfterCompletion" : "forever"
-							},
-							"3-create-adminuser" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted -Command ", 
-									"\"New-ADUser ",
-									"-Name ", { "Ref" : "DomainAdminUser" }, " ",
-									"-UserPrincipalName ", { "Ref" : "DomainAdminUser" }, "@", { "Ref" : "DomainDNSName" }, " ",
-									"-AccountPassword (ConvertTo-SecureString ", { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force) ",
-									"-Enabled $true ",
-									"-PasswordNeverExpires $true\""
-								]]},
-								"waitAfterCompletion" : "0"
-							},
-							"4-update-adminuser" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted -Command \"", 
-									"Add-ADGroupMember 'Domain Admins' -Members ", { "Ref" : "DomainAdminUser" }, "\""
-								]]},
-								"waitAfterCompletion" : "0"
-							},
-							"5-download-CreateUsers-database" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted", 
-									" Start-BitsTransfer -Source https://s3.amazonaws.com/CFN_WS2012_Scripts/AD/users.csv -Destination c:\\cfn\\users.csv -EA 0"
-								]]},
-								"waitAfterCompletion" : "0"
-							},
-							"6-download-CreateUsers-script" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted", 
-									" Start-BitsTransfer -Source https://s3.amazonaws.com/CFN_WS2012_Scripts/AD/New-LabADUser.ps1 -Destination c:\\cfn\\New-LabADUser.ps1 -EA 0"
-								]]},
-								"waitAfterCompletion" : "0"
-							},
-							"7-run-CreateUsers-script" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted", 
-									" C:\\cfn\\New-LabADUser.ps1 -Count ", { "Ref" : "UserCount" }, 
-									" -UpnSuffix ", { "Ref" : "DomainDNSName" },
-									" -Password p@ssword123 -EA 0"
-								]]},
-								"waitAfterCompletion" : "0"
-							}
-						}
-					},
-					"configureSites" : {
-						"commands" : {
-							"1-rename-default-site" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted ",
-									"\"", 
-									"Get-ADObject -SearchBase (Get-ADRootDSE).ConfigurationNamingContext -filter {Name -eq 'Default-First-Site-Name'} | Rename-ADObject -NewName AZ1",
-									"\""
-								]]},
-								"waitAfterCompletion" : "0"						
-							},
-							"2-create-site-2" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted New-ADReplicationSite AZ2"
-								]]},
-								"waitAfterCompletion" : "0"
-							},
-							"3-create-subnet-1" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted", 
-									" New-ADReplicationSubnet -Name ",
-									{ "Ref" : "PrivSub1CIDR" },
-									" -Site AZ1"
-								]]},
-								"waitAfterCompletion" : "0"
-							},
-							"4-create-subnet-2" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted", 
-									" New-ADReplicationSubnet -Name ",
-									{ "Ref" : "PrivSub2CIDR" },
-									" -Site AZ2"
-								]]},
-								"waitAfterCompletion" : "0"
-							},
-							"5-create-subnet-3" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted", 
-									" New-ADReplicationSubnet -Name ",
-									{ "Ref" : "PrivSub3CIDR" },
-									" -Site AZ1"
-								]]},
-								"waitAfterCompletion" : "0"
-							},
-							"6-create-subnet-4" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted", 
-									" New-ADReplicationSubnet -Name ",
-									{ "Ref" : "PrivSub4CIDR" },
-									" -Site AZ2"
-								]]},
-								"waitAfterCompletion" : "0"
-							},
-							"7-create-subnet-4" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted \"", 
-									"Get-ADReplicationSiteLink -Filter * | Set-ADReplicationSiteLink -SitesIncluded @{add='AZ2'}\""
-								]]},
-								"waitAfterCompletion" : "0"
-							}
-						}
-					},
-					"reboot" : {
-						"commands" : {
-							"1-post-config-reboot" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted Restart-Computer "
-								]]}
-							}
-						}
-					},
 					"finalize" : {
 						"commands" : {
 							"1-signal-success" : { 
@@ -795,7 +609,7 @@
                 "AWS::CloudFormation::Init" : {
                     "configSets" : {
                         "config" : [
-                            "setup", "rename", "join", "addDomainController", "finalize"
+                            "setup", "rename", "finalize"
                         ]
                     },
                     "setup"      : {
@@ -867,53 +681,6 @@
 							}
 						}
 					},
-					"join" : {
-						"commands" : {
-							"1-set-dns-servers" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted ",
-									"\"", 
-									"Get-NetAdapter | Set-DnsClientServerAddress -ServerAddresses ",
-									{ "Ref" : "AD1PrivateIp" },
-									"\""
-								]]},
-								"waitAfterCompletion" : "5"						
-							},
-							"2-join-domain" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe ", "-ExecutionPolicy", " Unrestricted -Command \"", 
-									"Add-Computer -DomainName ", { "Ref" : "DomainDNSName" }, " -Credential ",
-									"(New-Object System.Management.Automation.PSCredential('", { "Ref" : "DomainNetBIOSName"}, "\\", { "Ref" : "DomainAdminUser" } , "',",
-									"(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force))) ",
-									"-Restart\""
-								]]
-								},
-								"waitAfterCompletion" : "0"
-							}
-						}
-					},
-					"addDomainController" : {
-						"commands" : {
-							"1-install-prereqs" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy -Command \"Install-WindowsFeature AD-Domain-Services, rsat-adds -IncludeAllSubFeature\""
-								]]},
-								"waitAfterCompletion" : "0"						
-							},
-							"2-add-dc" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe ", "-ExecutionPolicy", " Unrestricted -Command \"", 
-									"Install-ADDSDomainController -InstallDns -DomainName ", { "Ref" : "DomainDNSName" }, " -Credential ",
-									"(New-Object System.Management.Automation.PSCredential('", { "Ref" : "DomainNetBIOSName"}, "\\", { "Ref" : "DomainAdminUser" }, "',",
-									"(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force))) ",
-									"-SafeModeAdministratorPassword ", "(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force) ",
-									"-NoGlobalCatalog:$false ",
-									"-Confirm:$false -Force\""
-								]]},
-								"waitAfterCompletion" : "forever"
-							}
-						}
-					},
 					"finalize" : {
 						"commands" : {
 							"1-signal-success" : { 
@@ -966,7 +733,7 @@
                 "AWS::CloudFormation::Init" : {
                     "configSets" : {
                         "config" : [
-                            "setup", "rename", "join", "installRDS", "finalize"
+                            "setup", "rename", "installRDS", "finalize"
                         ]
                     },
                     "setup"      : {
@@ -1036,31 +803,6 @@
 							}
 						}
 					},
-					"join" : {
-						"commands" : {
-							"1-set-dns-servers" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted ",
-									"\"", 
-									"Get-NetAdapter | Set-DnsClientServerAddress -ServerAddresses ",
-									{ "Ref" : "AD1PrivateIp" },
-									"\""
-								]]},
-								"waitAfterCompletion" : "5"						
-							},
-							"2-join-domain" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe ", "-ExecutionPolicy", " Unrestricted -Command \"", 
-									"Add-Computer -DomainName ", { "Ref" : "DomainDNSName" }, " -Credential ",
-									"(New-Object System.Management.Automation.PSCredential('", { "Ref" : "DomainNetBIOSName"}, "\\", { "Ref" : "DomainAdminUser" } , "',",
-									"(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force))) ",
-									"-Restart\""
-								]]
-								},
-								"waitAfterCompletion" : "0"
-							}
-						}
-					},
 					"installRDS" : {
 						"commands" : {
 							"1-install-rds" : {
@@ -1122,7 +864,7 @@
                 "AWS::CloudFormation::Init" : {
                     "configSets" : {
                         "config" : [
-                            "setup", "rename", "join", "installRDS", "finalize"
+                            "setup", "rename", "installRDS", "finalize"
                         ]
                     },
                     "setup"      : {
@@ -1189,31 +931,6 @@
 								"command" : { "Fn::Join" : [ "", [
 									"powershell.exe -ExecutionPolicy Unrestricted Rename-Computer -NewName RDGateway2 -Restart"
 								]]}
-							}
-						}
-					},
-					"join" : {
-						"commands" : {
-							"1-set-dns-servers" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe -ExecutionPolicy Unrestricted ",
-									"\"", 
-									"Get-NetAdapter | Set-DnsClientServerAddress -ServerAddresses ",
-									{ "Ref" : "AD1PrivateIp" },
-									"\""
-								]]},
-								"waitAfterCompletion" : "5"						
-							},
-							"2-join-domain" : {
-								"command" : { "Fn::Join" : [ "", [
-									"powershell.exe ", "-ExecutionPolicy", " Unrestricted -Command \"", 
-									"Add-Computer -DomainName ", { "Ref" : "DomainDNSName" }, " -Credential ",
-									"(New-Object System.Management.Automation.PSCredential('", { "Ref" : "DomainNetBIOSName"}, "\\", { "Ref" : "DomainAdminUser" } , "',",
-									"(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force))) ",
-									"-Restart\""
-								]]
-								},
-								"waitAfterCompletion" : "0"
 							}
 						}
 					},
@@ -1492,10 +1209,6 @@
 		"RDGW2ElasticIP" : {
 			"Value" : { "Ref" : "Rdgw2EIP" },
 			"Description" : "Elastic IP address of the second Remote Desktop Gateway (RDGW2) in AZ2"
-		},
-		"DomainAdmin" : {
-			"Value" : { "Fn::Join" : ["", [{ "Ref" : "DomainNetBIOSName" }, "\\StackAdmin" ]] },
-			"Description" : "Domain administrator account"
 		}
 	}  
 }
