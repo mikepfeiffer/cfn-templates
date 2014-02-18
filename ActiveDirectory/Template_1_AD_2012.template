@@ -1,0 +1,1501 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "(0001) - This template creates a VPC infrastructure for a multi-AZ, multi-tier deployment of a Windows based Application infrstructure. It installs 2 Active Directory Domain Controllers into subnets in seperate AZs inside a VPC, as well as Remote Desktop Gateway and NAT instances into the DMZ for each Availability Zone. The default Domain Administrator password will be the one retrieved from the instance.  For adding members to the domain, ensure that they are launched into the domain member security group created by this template and then configure them to use the AD instances fixed private IP addresses as the DNS server. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
+
+  "Parameters" : {
+
+		"KeyPairName" : {
+			"Description" : "Public/private key pairs allow you to securely connect to your instance after it launches",
+			"Type" : "String"
+		},
+		"ADInstanceType" : {
+			"Description" : "Amazon EC2 instance type for the first Active Directory Instance",
+			"Type" : "String",
+			"Default" : "m3.xlarge",
+			"AllowedValues" : [ "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m3.xlarge", "c1.medium", "c1.xlarge"]
+		},
+		"AD2InstanceType" : {
+			"Description" : "Amazon EC2 instance type for the second Active Directory Instance",
+			"Type" : "String",
+			"Default" : "m3.xlarge",
+			"AllowedValues" : [ "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m3.xlarge", "c1.medium", "c1.xlarge"]
+		},
+		"NATInstanceType" : {
+			"Description" : "Amazon EC2 instance type for the NAT Instances",
+			"Type" : "String",
+			"Default" : "m1.small",
+			"AllowedValues" : [ "m1.small", "m1.medium", "m1.large", "m1.xlarge" ]
+		},
+		"RDGWInstanceType" : {
+			"Description" : "Amazon EC2 instance type for the Remote Desktop Gatweway Instance",
+			"Type" : "String",
+			"Default" : "m3.xlarge",
+			"AllowedValues" : [ "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m3.xlarge", "c1.medium", "c1.xlarge"]
+		},
+
+		"DomainDNSName" : {
+			"Description" : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.com",
+			"Type" : "String",
+			"Default" : "contoso.com",
+			"MinLength" : "3",
+			"MaxLength" : "25",
+			"AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+		},
+		"DomainNetBIOSName" : {
+			"Description" : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. CORP",
+			"Type" : "String",
+			"Default" : "contoso",
+			"MinLength" : "1",
+			"MaxLength" : "15",
+			"AllowedPattern" : "[a-zA-Z0-9]+"
+		},
+		"ServerNetBIOSName1" : {
+			"Description" : "NetBIOS name of the 1st AD Server (upto 15 characters)",
+			"Type" : "String",
+			"Default" : "DC1",
+			"MinLength" : "1",
+			"MaxLength" : "15",
+			"AllowedPattern" : "[a-zA-Z0-9]+"
+		},
+		"ServerNetBIOSName2" : {
+			"Description" : "NetBIOS name of the 2nd AD Server (upto 15 characters)",
+			"Type" : "String",
+			"Default" : "DC2",
+			"MinLength" : "1",
+			"MaxLength" : "15",
+			"AllowedPattern" : "[a-zA-Z0-9]+"
+		},		
+		"RestoreModePassword" : {
+			"Description" : "Password for a separate Administrator account when the domain controller is in Restore Mode. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type" : "String",
+			"MinLength" : "8",
+			"MaxLength" : "32",
+			"AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho" : "True",
+			"Default" : "Password123"
+		},
+		"DomainAdminUser" : {
+			"Description" : "User name for the account that will be added as Domain Administrator. This is separate from the default \"Administrator\" account",
+			"Type" : "String",
+			"Default" : "StackAdmin",
+			"MinLength" : "5",
+			"MaxLength" : "25",
+			"AllowedPattern" : "[a-zA-Z0-9]*"
+		},
+		"DomainAdminPassword" : {
+			"Description" : "Password for the domain admin user. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type" : "String",
+			"MinLength" : "8",
+			"MaxLength" : "32",
+			"AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho" : "true",
+			"Default" : "Password123"
+		},
+		"UserCount" : {
+			"Description" : "Total number of test user accounts to create in Active Directory",
+			"Type" : "Number",
+			"Default" : "25"
+		},
+						
+		"AZ1" : {
+			"Description" : "Name of 1st Availability Zone that will contain public & private subnets - Select a valid Zone for your region",
+			"Type" : "String",
+			"Default" : "us-east-1a",
+			"AllowedValues" : ["eu-west-1a","eu-west-1b","eu-west-1c","us-east-1a","us-east-1b","us-east-1c","us-east-1d","us-west-1a","us-west-1b","us-west-1c","ap-southeast-1a","ap-southeast-1b","ap-northeast-1a","ap-northeast-1b","ap-northeast-1c","us-west-2a","us-west-2b","us-west-2c","sa-east-1a","sa-east-1b"],
+			"ConstraintDescription" : "Must be a valid EC2 Availabilty zone for region being deployed to. Only supports eu-west-1 ,us-east-1 & us-west-1 etc <- You can customize if you define a constraint"
+		},
+		"AZ2" : {
+			"Description" : "Name of 2nd Availability Zone that will contain public & private subnets - Select a valid Zone for your region",
+			"Type" : "String",
+			"Default" : "us-east-1c",
+			"AllowedValues" : ["eu-west-1a","eu-west-1b","eu-west-1c","us-east-1a","us-east-1b","us-east-1c","us-east-1d","us-west-1a","us-west-1b","us-west-1c","ap-southeast-1a","ap-southeast-1b","ap-northeast-1a","ap-northeast-1b","ap-northeast-1c","us-west-2a","us-west-2b","us-west-2c","sa-east-1a","sa-east-1b"],
+			"ConstraintDescription" : "Must be a valid EC2 Availabilty zone for region being deployed to. Only supports eu-west-1 ,us-east-1 & us-west-1 etc <- You can customize if you define a constraint"
+		},
+
+		"DMZ1CIDR" : {
+			"Description" : "CIDR Block for the Public DMZ Subnet located in AZ1",
+			"Type" : "String",
+			"Default" : "10.0.0.0/24",
+			"AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+		},
+		"DMZ2CIDR" : {
+			"Description" : "CIDR Block for the Public DMZ Subnet located in AZ2",
+			"Type" : "String",
+			"Default" : "10.0.1.0/24",
+			"AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+		},
+		"PrivSub1CIDR" : {
+			"Description" : "CIDR Block for Private Subnet 1 located in AZ1",
+			"Type" : "String",
+			"Default" : "10.0.2.0/24",
+			"AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+		},
+		"PrivSub2CIDR" : {
+			"Description" : "CIDR Block for Private Subnet 2 located in AZ2",
+			"Type" : "String",
+			"Default" : "10.0.3.0/24",
+			"AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+		},
+		"PrivSub3CIDR" : {
+			"Description" : "CIDR Block for Private Subnet 3 located in AZ1",
+			"Type" : "String",
+			"Default" : "10.0.4.0/24",
+			"AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+		},
+		"PrivSub4CIDR" : {
+			"Description" : "CIDR Block for Private Subnet 4 located in AZ2",
+			"Type" : "String",
+			"Default" : "10.0.5.0/24",
+			"AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+		},
+		"VPCCIDR" : {
+			"Description" : "CIDR Block for the VPC",
+			"Type" : "String",
+			"Default" : "10.0.0.0/16",
+			"AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+		},
+		"AD1PrivateIp" : {
+			"Description" : "Fixed private IP for the first Active Directory server located in AZ1",
+			"Type" : "String",
+			"Default" : "10.0.2.10"
+		},
+		"AD2PrivateIp" : {
+			"Description" : "Fixed private IP for the second Active Directory serverr located in AZ2",
+			"Type" : "String",
+			"Default" : "10.0.3.10"
+		}
+	},
+	
+  "Mappings" : {
+		"AWSInstanceType2Arch" : {
+			"m1.small"   : { "Arch" : "64" },
+			"m1.medium"  : { "Arch" : "64" },
+			"m1.large"   : { "Arch" : "64" },
+			"m1.xlarge"  : { "Arch" : "64" },
+			"m2.xlarge"  : { "Arch" : "64" },
+			"m2.2xlarge" : { "Arch" : "64" },
+			"m2.4xlarge" : { "Arch" : "64" },
+			"m3.xlarge"  : { "Arch" : "64" },
+			"c1.medium"  : { "Arch" : "64" },
+			"c1.xlarge"  : { "Arch" : "64" }
+		},
+        "AWSRegionArch2AMI"    : {
+            "us-east-1" : {
+                "64" : "ami-7527031c"
+            },
+            "eu-west-1" : {
+                "64" : "ami-3937da4e"
+            },
+            "ap-northeast-1" : {
+                "64" : "ami-b1492eb0"
+            },
+            "us-west-1"      : {
+                "64" : "ami-0285b347"
+            },
+            "us-west-2"      : {
+                "64" : "ami-b652c986"
+            },
+            "ap-southeast-1" : {
+                "64" : "ami-dccc998e"
+            },
+            "ap-southeast-2" : {
+                "64" : "ami-9d3fa3a7"
+            },
+            "sa-east-1"      : {
+                "64" : "ami-9b3a9c86"
+            }
+        },
+		"AWSRegionArchNatAMI" : {
+			"us-east-1"      : {"64" : "ami-f619c29f"},
+			"us-west-2"      : {"64" : "ami-52ff7262"},
+			"us-west-1"      : {"64" : "ami-3bcc9e7e"},
+			"eu-west-1"      : {"64" : "ami-e5e2d991"},
+			"ap-southeast-1" : {"64" : "ami-02eb9350"},
+			"ap-northeast-1" : {"64" : "ami-02eb9350"},
+			"sa-east-1"      : {"64" : "ami-0039e61d"},
+			"us-gov-west-1"  : {"64" : "ami-ff5a3edc"}
+		}
+	},
+
+  "Resources" : {
+		"IAMUser" : {
+			"Type" : "AWS::IAM::User",
+			"Properties" : {
+				"Path": "/",
+				"Policies": [{
+					"PolicyName": "root",
+					"PolicyDocument": { "Statement":[{
+						"Effect": "Allow",
+						"Action": [
+						"CloudFormation:DescribeStackResource"					
+						],
+						"Resource": "*"
+					}]}
+				}]
+			}
+		},
+		"IAMUserAccessKey" : {
+			"Type" : "AWS::IAM::AccessKey",
+			"Properties" : {
+				"UserName" : {"Ref": "IAMUser"}
+			}
+		},
+
+		"ContosoDhcpOptions" : {
+			"Type" : "AWS::EC2::DHCPOptions",
+			"Properties" : {
+				"DomainName" : { "Ref" : "DomainDNSName"},
+				"DomainNameServers" : ["AmazonProvidedDNS"],
+				"NtpServers" : [{ "Ref" : "AD1PrivateIp"}],
+				"NetbiosNameServers" : [{ "Ref" : "AD1PrivateIp"},{ "Ref" : "AD2PrivateIp"}],
+				"NetbiosNodeType" : "2",
+				"Tags" : [
+					{"Key" : "Domain", "Value" : { "Ref" : "DomainDNSName"}}]
+			}
+		},
+		"VPC" : {
+			"Type" : "AWS::EC2::VPC",
+			"Properties" : {
+				"CidrBlock" : { "Ref" : "VPCCIDR" },
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "Public" }
+				]
+			}
+		},
+		"ContosoVPCDHCPOptionsAssociation" : {
+			"Type" : "AWS::EC2::VPCDHCPOptionsAssociation",
+			"Properties" : {
+				"VpcId" : {"Ref" : "VPC"},
+				"DhcpOptionsId" : {"Ref" : "ContosoDhcpOptions"}
+			}
+		},
+		
+		"DMZSubnet" : {
+			"Type" : "AWS::EC2::Subnet",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"CidrBlock" : { "Ref" : "DMZ1CIDR" },
+				"AvailabilityZone" : { "Ref" : "AZ1" },
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "Public" },
+					{"Key" : "Role", "Value" : "DMZ 1 Subnet" }
+				]
+			}
+		},
+		"DMZ2Subnet" : {
+			"Type" : "AWS::EC2::Subnet",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"CidrBlock" : { "Ref" : "DMZ2CIDR" },
+				"AvailabilityZone" : { "Ref" : "AZ2" },
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "Public" },
+					{"Key" : "Role", "Value" : "DMZ 2 Subnet" }
+				]
+			}
+		},
+		"PrivateSubnet1" : {
+			"Type" : "AWS::EC2::Subnet",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"CidrBlock" : { "Ref" : "PrivSub1CIDR" },
+				"AvailabilityZone" : { "Ref" : "AZ1" },
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "Private" },
+					{"Key" : "Role", "Value" : "AD1 Subnet" }
+				]
+			}
+		},
+		"PrivateSubnet2" : {
+			"Type" : "AWS::EC2::Subnet",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"CidrBlock" : { "Ref" : "PrivSub2CIDR" },
+				"AvailabilityZone" : { "Ref" : "AZ2" },
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "Private" },
+					{"Key" : "Role", "Value" : "AD2 Subnet" }
+				]
+			}
+		},
+		"PrivateSubnet3" : {
+			"Type" : "AWS::EC2::Subnet",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"CidrBlock" : { "Ref" : "PrivSub3CIDR" },
+				"AvailabilityZone" : { "Ref" : "AZ1" },
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "Private" },
+					{"Key" : "Role", "Value" : "APPSVR1 Subnet" }
+				]
+			}
+		},
+		"PrivateSubnet4" : {
+			"Type" : "AWS::EC2::Subnet",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"CidrBlock" : { "Ref" : "PrivSub4CIDR" },
+				"AvailabilityZone" : { "Ref" : "AZ2" },
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "Private" },
+					{"Key" : "Role", "Value" : "APPSVR2 Subnet" }
+				]
+			}
+		},
+
+		"InternetGateway" : {
+			"Type" : "AWS::EC2::InternetGateway",
+			"Properties" : {
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "Public" }
+				]
+			}
+		},
+		"AttachGateway" : {
+			"Type" : "AWS::EC2::VPCGatewayAttachment",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"InternetGatewayId" : { "Ref" : "InternetGateway" }
+			}
+		},
+		"DMZRouteTable" : {
+			"Type" : "AWS::EC2::RouteTable",
+			"Properties" : {
+				"VpcId" : {"Ref" : "VPC"},
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "DMZ" }
+				]
+			}
+		},
+		"DMZRoute" : {
+			"Type" : "AWS::EC2::Route",
+			"Properties" : {
+				"RouteTableId" : { "Ref" : "DMZRouteTable" },
+				"DestinationCidrBlock" : "0.0.0.0/0",
+				"GatewayId" : { "Ref" : "InternetGateway" }
+			}
+		},
+		"DMZ1SubnetRouteTableAssociation" : {
+			"Type" : "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties" : {
+				"SubnetId" : { "Ref" : "DMZSubnet" },
+				"RouteTableId" : { "Ref" : "DMZRouteTable" }
+			}
+		},
+		"DMZ2SubnetRouteTableAssociation" : {
+			"Type" : "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties" : {
+				"SubnetId" : { "Ref" : "DMZ2Subnet" },
+				"RouteTableId" : { "Ref" : "DMZRouteTable" }
+			}
+		},
+
+		"PrivateRouteTable" : {
+			"Type" : "AWS::EC2::RouteTable",
+			"Properties" : {
+				"VpcId" : {"Ref" : "VPC"},
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "AZ1 Private" }
+				]
+			}
+		},
+		"PrivateRoute" : {
+			"Type" : "AWS::EC2::Route",
+			"Properties" : {
+				"RouteTableId" : { "Ref" : "PrivateRouteTable" },
+				"DestinationCidrBlock" : "0.0.0.0/0",
+				"InstanceId" : { "Ref" : "NAT1" }
+			}
+		},
+
+		"PrivateRouteTable2" : {
+			"Type" : "AWS::EC2::RouteTable",
+			"Properties" : {
+				"VpcId" : {"Ref" : "VPC"},
+				"Tags" : [
+					{"Key" : "Application", "Value" : { "Ref" : "AWS::StackName"} },
+					{"Key" : "Network", "Value" : "AZ2 Private" }
+				]
+			}
+		},
+		"PrivateRoute2" : {
+			"Type" : "AWS::EC2::Route",
+			"Properties" : {
+				"RouteTableId" : { "Ref" : "PrivateRouteTable2" },
+				"DestinationCidrBlock" : "0.0.0.0/0",
+				"InstanceId" : { "Ref" : "NAT2" }
+			}
+		},
+		
+		"PrivateSubnetRouteTableAssociation1" : {
+			"Type" : "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties" : {
+				"SubnetId" : { "Ref" : "PrivateSubnet1" },
+				"RouteTableId" : { "Ref" : "PrivateRouteTable" }
+			}
+		},
+		"PrivateSubnetRouteTableAssociation2" : {
+			"Type" : "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties" : {
+				"SubnetId" : { "Ref" : "PrivateSubnet2" },
+				"RouteTableId" : { "Ref" : "PrivateRouteTable2" }
+			}
+		},
+		"PrivateSubnetRouteTableAssociation3" : {
+			"Type" : "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties" : {
+				"SubnetId" : { "Ref" : "PrivateSubnet3" },
+				"RouteTableId" : { "Ref" : "PrivateRouteTable" }
+			}
+		},
+		"PrivateSubnetRouteTableAssociation4" : {
+			"Type" : "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties" : {
+				"SubnetId" : { "Ref" : "PrivateSubnet4" },
+				"RouteTableId" : { "Ref" : "PrivateRouteTable2" }
+			}
+		},
+
+		"RdgwEIP" : {
+			"Type" : "AWS::EC2::EIP",
+			"Properties" : {
+				"Domain" : "vpc",
+				"InstanceId" : { "Ref" : "RDGateway" }
+			}
+		},
+		"NAT1EIP" : {
+			"Type" : "AWS::EC2::EIP",
+			"Properties" : {
+				"Domain" : "vpc",
+				"InstanceId" : { "Ref" : "NAT1" }
+			}
+		},
+		"Rdgw2EIP" : {
+			"Type" : "AWS::EC2::EIP",
+			"Properties" : {
+				"Domain" : "vpc",
+				"InstanceId" : { "Ref" : "RDGateway2" }
+			}
+		},
+		"NAT2EIP" : {
+			"Type" : "AWS::EC2::EIP",
+			"Properties" : {
+				"Domain" : "vpc",
+				"InstanceId" : { "Ref" : "NAT2" }
+			}
+		},
+		
+		"NAT1" : {
+			"Type" : "AWS::EC2::Instance",
+			"Properties" : { 
+				"ImageId" : { "Fn::FindInMap" : [ "AWSRegionArchNatAMI", { "Ref" : "AWS::Region" }, { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "NATInstanceType" }, "Arch" ] } ] },
+				"InstanceType" : { "Ref" : "NATInstanceType" },
+				"SubnetId" : { "Ref" : "DMZSubnet" },
+				"Tags" : [ {
+					"Key" : "Name",
+					"Value" : "NAT1"
+				} ],
+				"SecurityGroupIds" : [ { "Ref" : "NATSecurityGroup" } ],
+				"KeyName" : { "Ref" : "KeyPairName" },
+				"SourceDestCheck" : "false"
+			}
+		},
+		"NAT2" : {
+			"Type" : "AWS::EC2::Instance",
+			"DependsOn" : "NAT1",
+			"Properties" : { 
+				"ImageId" : { "Fn::FindInMap" : [ "AWSRegionArchNatAMI", { "Ref" : "AWS::Region" }, { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "NATInstanceType" }, "Arch" ] } ] },
+				"InstanceType" : { "Ref" : "NATInstanceType" },
+				"SubnetId" : { "Ref" : "DMZ2Subnet" },
+				"Tags" : [ {
+					"Key" : "Name",
+					"Value" : "NAT2"
+				} ],
+				"SecurityGroupIds" : [ { "Ref" : "NATSecurityGroup" } ],
+				"KeyName" : { "Ref" : "KeyPairName" },
+				"SourceDestCheck" : "false"
+			}
+		},
+		
+		"DomainController": {  
+			"Type" : "AWS::EC2::Instance",
+			"DependsOn" : "NAT2",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "setup", "rename", "installADDS", "configureSites", "reboot", "finalize"
+                        ]
+                    },
+                    "setup"      : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackName"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.DomainController.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -c config -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r DomainController",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+					"rename" : {
+						"commands" : {
+							"1-execute-powershell-script-RenameComputer" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted Rename-Computer -NewName ", 
+									{ "Ref" : "ServerNetBIOSName1" },
+									" -Restart"
+								]]}
+							}
+						}
+					},
+					"installADDS" : {
+						"commands" : {
+							"1-install-prereqs" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy -Command \"Install-WindowsFeature AD-Domain-Services, rsat-adds -IncludeAllSubFeature\""
+								]]},
+								"waitAfterCompletion" : "0"						
+							},
+							"2-install-adds" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
+									"\"Install-ADDSForest -DomainName ", { "Ref" : "DomainDNSName" }, " ",
+									"-SafeModeAdministratorPassword (convertto-securestring ", { "Ref" : "DomainAdminPassword" }, " -asplaintext -force) ",
+									"-DomainMode Win2012 ",
+									"-DomainNetbiosName ", { "Ref" : "DomainNetBIOSName" } , " ",
+									"-ForestMode Win2012 ",
+									"-Confirm:$false ",
+									"-Force\""
+								]]},
+								"waitAfterCompletion" : "forever"
+							},
+							"3-create-adminuser" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ", 
+									"\"New-ADUser ",
+									"-Name ", { "Ref" : "DomainAdminUser" }, " ",
+									"-UserPrincipalName ", { "Ref" : "DomainAdminUser" }, "@", { "Ref" : "DomainDNSName" }, " ",
+									"-AccountPassword (ConvertTo-SecureString ", { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force) ",
+									"-Enabled $true ",
+									"-PasswordNeverExpires $true\""
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"4-update-adminuser" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command \"", 
+									"Add-ADGroupMember 'Domain Admins' -Members ", { "Ref" : "DomainAdminUser" }, "\""
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"5-download-CreateUsers-database" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted", 
+									" Start-BitsTransfer -Source https://s3.amazonaws.com/CFN_WS2012_Scripts/AD/users.csv -Destination c:\\cfn\\users.csv -EA 0"
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"6-download-CreateUsers-script" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted", 
+									" Start-BitsTransfer -Source https://s3.amazonaws.com/CFN_WS2012_Scripts/AD/New-LabADUser.ps1 -Destination c:\\cfn\\New-LabADUser.ps1 -EA 0"
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"7-run-CreateUsers-script" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted", 
+									" C:\\cfn\\New-LabADUser.ps1 -Count ", { "Ref" : "UserCount" }, 
+									" -UpnSuffix ", { "Ref" : "DomainDNSName" },
+									" -Password p@ssword123 -EA 0"
+								]]},
+								"waitAfterCompletion" : "0"
+							}
+						}
+					},
+					"configureSites" : {
+						"commands" : {
+							"1-rename-default-site" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted ",
+									"\"", 
+									"Get-ADObject -SearchBase (Get-ADRootDSE).ConfigurationNamingContext -filter {Name -eq 'Default-First-Site-Name'} | Rename-ADObject -NewName AZ1",
+									"\""
+								]]},
+								"waitAfterCompletion" : "0"						
+							},
+							"2-create-site-2" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted New-ADReplicationSite AZ2"
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"3-create-subnet-1" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted", 
+									" New-ADReplicationSubnet -Name ",
+									{ "Ref" : "PrivSub1CIDR" },
+									" -Site AZ1"
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"4-create-subnet-2" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted", 
+									" New-ADReplicationSubnet -Name ",
+									{ "Ref" : "PrivSub2CIDR" },
+									" -Site AZ2"
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"5-create-subnet-3" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted", 
+									" New-ADReplicationSubnet -Name ",
+									{ "Ref" : "PrivSub3CIDR" },
+									" -Site AZ1"
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"6-create-subnet-4" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted", 
+									" New-ADReplicationSubnet -Name ",
+									{ "Ref" : "PrivSub4CIDR" },
+									" -Site AZ2"
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"7-create-subnet-4" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted \"", 
+									"Get-ADReplicationSiteLink -Filter * | Set-ADReplicationSiteLink -SitesIncluded @{add='AZ2'}\""
+								]]},
+								"waitAfterCompletion" : "0"
+							}
+						}
+					},
+					"reboot" : {
+						"commands" : {
+							"1-post-config-reboot" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted Restart-Computer "
+								]]}
+							}
+						}
+					},
+					"finalize" : {
+						"commands" : {
+							"1-signal-success" : { 
+								"command" : { "Fn::Join" : ["", [ 
+									"cfn-signal.exe -e 0 \"", { "Ref" : "DomainControllerWaitHandle" },"\"" ]]
+								}
+							}
+						}
+					}
+                }
+            },
+			"Properties": {
+				"ImageId" : { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" }, { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "ADInstanceType" }, "Arch" ] } ] },
+				"InstanceType" : { "Ref" : "ADInstanceType" },
+				"SubnetId" : { "Ref" : "PrivateSubnet1" },
+				"Tags" : [ {
+					"Key" : "Name",
+					"Value" : { "Ref" : "ServerNetBIOSName1" }
+				} ],
+				"SecurityGroupIds" : [ {"Ref" : "DomainControllerSG1"} ],
+				"PrivateIpAddress" : { "Ref" : "AD1PrivateIp" },
+				"KeyName" : { "Ref" : "KeyPairName" },
+                "UserData"         : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r DomainController",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>\n"
+                            ]
+                        ]
+                    }
+                }       
+			}
+		},
+		"DomainController2": {  
+			"Type" : "AWS::EC2::Instance",
+			"DependsOn" : "DomainControllerWaitCondition",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "setup", "rename", "join", "addDomainController", "finalize"
+                        ]
+                    },
+                    "setup"      : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackName"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.DomainController2.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -c config -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r DomainController2",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+					"rename" : {
+						"commands" : {
+							"1-execute-powershell-script-RenameComputer" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted Rename-Computer -NewName ", 
+									{ "Ref" : "ServerNetBIOSName2" },
+									" -Restart"
+								]]}
+							}
+						}
+					},
+					"join" : {
+						"commands" : {
+							"1-set-dns-servers" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted ",
+									"\"", 
+									"Get-NetAdapter | Set-DnsClientServerAddress -ServerAddresses ",
+									{ "Ref" : "AD1PrivateIp" },
+									"\""
+								]]},
+								"waitAfterCompletion" : "5"						
+							},
+							"2-join-domain" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe ", "-ExecutionPolicy", " Unrestricted -Command \"", 
+									"Add-Computer -DomainName ", { "Ref" : "DomainDNSName" }, " -Credential ",
+									"(New-Object System.Management.Automation.PSCredential('", { "Ref" : "DomainNetBIOSName"}, "\\", { "Ref" : "DomainAdminUser" } , "',",
+									"(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force))) ",
+									"-Restart\""
+								]]
+								},
+								"waitAfterCompletion" : "0"
+							}
+						}
+					},
+					"addDomainController" : {
+						"commands" : {
+							"1-install-prereqs" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy -Command \"Install-WindowsFeature AD-Domain-Services, rsat-adds -IncludeAllSubFeature\""
+								]]},
+								"waitAfterCompletion" : "0"						
+							},
+							"2-add-dc" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe ", "-ExecutionPolicy", " Unrestricted -Command \"", 
+									"Install-ADDSDomainController -InstallDns -DomainName ", { "Ref" : "DomainDNSName" }, " -Credential ",
+									"(New-Object System.Management.Automation.PSCredential('", { "Ref" : "DomainNetBIOSName"}, "\\", { "Ref" : "DomainAdminUser" }, "',",
+									"(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force))) ",
+									"-SafeModeAdministratorPassword ", "(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force) ",
+									"-NoGlobalCatalog:$false ",
+									"-Confirm:$false -Force\""
+								]]},
+								"waitAfterCompletion" : "forever"
+							}
+						}
+					},
+					"finalize" : {
+						"commands" : {
+							"1-signal-success" : { 
+								"command" : { "Fn::Join" : ["", [ 
+									"cfn-signal.exe -e 0 \"", { "Ref" : "DomainController2WaitHandle" },"\"" ]]
+								}
+							}
+						}
+					}
+                }
+            },
+			"Properties": {
+				"ImageId" : { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" }, { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "AD2InstanceType" }, "Arch" ] } ] },
+				"InstanceType" : { "Ref" : "AD2InstanceType" },
+				"SubnetId" : { "Ref" : "PrivateSubnet2" },
+				"Tags" : [ {
+					"Key" : "Name",
+					"Value" : { "Ref" : "ServerNetBIOSName2" }
+				} ],
+				"SecurityGroupIds" : [ {"Ref" : "DomainControllerSG2"} ],
+				"PrivateIpAddress" : { "Ref" : "AD2PrivateIp" },
+				"KeyName" : { "Ref" : "KeyPairName" },
+                "UserData"         : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r DomainController2",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>\n"
+                            ]
+                        ]
+                    }
+                }      
+			}
+		},
+		"RDGateway": {  
+			"Type" : "AWS::EC2::Instance",
+			"DependsOn" : "DomainController2",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "setup", "rename", "join", "installRDS", "finalize"
+                        ]
+                    },
+                    "setup"      : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackName"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.RDGateway.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -c config -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r RDGateway",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+					"rename" : {
+						"commands" : {
+							"1-execute-powershell-script-RenameComputer" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted Rename-Computer -NewName RDGateway -Restart"
+								]]}
+							}
+						}
+					},
+					"join" : {
+						"commands" : {
+							"1-set-dns-servers" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted ",
+									"\"", 
+									"Get-NetAdapter | Set-DnsClientServerAddress -ServerAddresses ",
+									{ "Ref" : "AD1PrivateIp" },
+									"\""
+								]]},
+								"waitAfterCompletion" : "5"						
+							},
+							"2-join-domain" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe ", "-ExecutionPolicy", " Unrestricted -Command \"", 
+									"Add-Computer -DomainName ", { "Ref" : "DomainDNSName" }, " -Credential ",
+									"(New-Object System.Management.Automation.PSCredential('", { "Ref" : "DomainNetBIOSName"}, "\\", { "Ref" : "DomainAdminUser" } , "',",
+									"(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force))) ",
+									"-Restart\""
+								]]
+								},
+								"waitAfterCompletion" : "0"
+							}
+						}
+					},
+					"installRDS" : {
+						"commands" : {
+							"1-install-rds" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted \"Install-WindowsFeature RDS-Gateway,RSAT-RDS-Gateway\""
+								]]}
+							}
+						}
+					},
+					"finalize" : {
+						"commands" : {
+							"1-signal-success" : { 
+								"command" : { "Fn::Join" : ["", [ 
+									"cfn-signal.exe -e 0 \"", { "Ref" : "RDGWWaitHandle" },"\"" ]]
+								}
+							}
+						}
+					}
+                }
+            },
+ 
+			"Properties": {
+				"ImageId" : { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" }, { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "AD2InstanceType" }, "Arch" ] } ] },
+				"InstanceType" : { "Ref" : "RDGWInstanceType" },
+				"SubnetId" : { "Ref" : "DMZSubnet" },
+				"Tags" : [ {
+					"Key" : "Name",
+					"Value" : "RDGW1"
+				} ],
+				"SecurityGroupIds" : [ {"Ref" : "RDGWSecurityGroup"}, {"Ref" : "DomainMemberSG"} ],
+				"KeyName" : { "Ref" : "KeyPairName" },
+                "UserData"         : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r RDGateway",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>\n"
+                            ]
+                        ]
+                    }
+                }       
+			}
+		},
+		"RDGateway2": {  
+			"Type" : "AWS::EC2::Instance",
+			"DependsOn" : "DomainController2",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "setup", "rename", "join", "installRDS", "finalize"
+                        ]
+                    },
+                    "setup"      : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackName"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.RDGateway2.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -c config -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r RDGateway2",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+					"rename" : {
+						"commands" : {
+							"1-execute-powershell-script-RenameComputer" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted Rename-Computer -NewName RDGateway2 -Restart"
+								]]}
+							}
+						}
+					},
+					"join" : {
+						"commands" : {
+							"1-set-dns-servers" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted ",
+									"\"", 
+									"Get-NetAdapter | Set-DnsClientServerAddress -ServerAddresses ",
+									{ "Ref" : "AD1PrivateIp" },
+									"\""
+								]]},
+								"waitAfterCompletion" : "5"						
+							},
+							"2-join-domain" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe ", "-ExecutionPolicy", " Unrestricted -Command \"", 
+									"Add-Computer -DomainName ", { "Ref" : "DomainDNSName" }, " -Credential ",
+									"(New-Object System.Management.Automation.PSCredential('", { "Ref" : "DomainNetBIOSName"}, "\\", { "Ref" : "DomainAdminUser" } , "',",
+									"(ConvertTo-SecureString ",  { "Ref" : "DomainAdminPassword" }, " -AsPlainText -Force))) ",
+									"-Restart\""
+								]]
+								},
+								"waitAfterCompletion" : "0"
+							}
+						}
+					},
+					"installRDS" : {
+						"commands" : {
+							"1-install-rds" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted \"Install-WindowsFeature RDS-Gateway,RSAT-RDS-Gateway\""
+								]]}
+							}
+						}
+					},
+					"finalize" : {
+						"commands" : {
+							"1-signal-success" : { 
+								"command" : { "Fn::Join" : ["", [ 
+									"cfn-signal.exe -e 0 \"", { "Ref" : "RDGW2WaitHandle" },"\"" ]]
+								}
+							}
+						}
+					}
+                }
+            },
+ 
+			"Properties": {
+				"ImageId" : { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" }, { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "AD2InstanceType" }, "Arch" ] } ] },
+				"InstanceType" : { "Ref" : "RDGWInstanceType" },
+				"SubnetId" : { "Ref" : "DMZ2Subnet" },
+				"Tags" : [ {
+					"Key" : "Name",
+					"Value" : "RDGW2"
+				} ],
+				"SecurityGroupIds" : [ {"Ref" : "RDGWSecurityGroup"}, {"Ref" : "DomainMemberSG"} ],
+				"KeyName" : { "Ref" : "KeyPairName" },
+                "UserData"         : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r RDGateway2",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>\n"
+                            ]
+                        ]
+                    }
+                }        
+			}
+		},
+
+		"DomainControllerWaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : "DomainController",
+			"Properties" : {
+				"Handle" : {"Ref" : "DomainControllerWaitHandle"},
+				"Timeout" : "3600"
+			}
+		},
+		"DomainControllerWaitHandle" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		},
+
+		"DomainController2WaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : "DomainController2",
+			"Properties" : {
+				"Handle" : {"Ref" : "DomainController2WaitHandle"},
+				"Timeout" : "3600"
+			}
+		},
+		"DomainController2WaitHandle" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		},
+		
+		"RDGWWaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : "RDGateway",
+			"Properties" : {
+				"Handle" : {"Ref" : "RDGWWaitHandle"},
+				"Timeout" : "3000"
+			}
+		},
+		"RDGWWaitHandle" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		},
+		"RDGW2WaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : "RDGateway2",
+			"Properties" : {
+				"Handle" : {"Ref" : "RDGW2WaitHandle"},
+				"Timeout" : "3000"
+			}
+		},
+		"RDGW2WaitHandle" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		},
+
+		"DomainControllerSG1" : {
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Domain Controller",
+				"VpcId" : { "Ref" : "VPC" },
+				"SecurityGroupIngress" : [
+					{"IpProtocol" : "udp", "FromPort" : "123", "ToPort" : "123", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "135", "ToPort" : "135", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "9389", "ToPort" : "9389", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "138", "ToPort" : "138", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "445", "ToPort" : "445", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "445", "ToPort" : "445", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "464", "ToPort" : "464", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "464", "ToPort" : "464", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "49152", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "49152", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "389", "ToPort" : "389", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "389", "ToPort" : "389", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "636", "ToPort" : "636", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3268", "ToPort" : "3268", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3269", "ToPort" : "3269", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "53", "ToPort" : "53", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "53", "ToPort" : "53", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "9389", "ToPort" : "9389", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "88", "ToPort" : "88", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "88", "ToPort" : "88", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "5355", "ToPort" : "5355", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "137", "ToPort" : "137", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "139", "ToPort" : "139", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "5722", "ToPort" : "5722", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+
+					{"IpProtocol" : "udp", "FromPort" : "123", "ToPort" : "123", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "135", "ToPort" : "135", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "9389", "ToPort" : "9389", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "138", "ToPort" : "138", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "445", "ToPort" : "445", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "445", "ToPort" : "445", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "464", "ToPort" : "464", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "464", "ToPort" : "464", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "49152", "ToPort" : "65535", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "49152", "ToPort" : "65535", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "389", "ToPort" : "389", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "389", "ToPort" : "389", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "636", "ToPort" : "636", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3268", "ToPort" : "3268", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3269", "ToPort" : "3269", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "53", "ToPort" : "53", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "53", "ToPort" : "53", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "88", "ToPort" : "88", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "88", "ToPort" : "88", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+
+					{"IpProtocol" : "tcp", "FromPort" : "3389", "ToPort" : "3389", "CidrIp" : { "Ref" : "DMZ1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3389", "ToPort" : "3389", "CidrIp" : { "Ref" : "DMZ2CIDR" } },
+					{ "IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : { "Ref" : "DMZ1CIDR" } },
+					{ "IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : { "Ref" : "DMZ2CIDR" } }
+				]
+			}      
+		},
+		"DomainControllerSG2" : {
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Domain Controller",
+				"VpcId" : { "Ref" : "VPC" },
+				"SecurityGroupIngress" : [
+					{"IpProtocol" : "udp", "FromPort" : "123", "ToPort" : "123", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "135", "ToPort" : "135", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "9389", "ToPort" : "9389", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "138", "ToPort" : "138", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "445", "ToPort" : "445", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "445", "ToPort" : "445", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "464", "ToPort" : "464", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "464", "ToPort" : "464", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "49152", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "49152", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "389", "ToPort" : "389", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "389", "ToPort" : "389", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "636", "ToPort" : "636", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3268", "ToPort" : "3268", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3269", "ToPort" : "3269", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "53", "ToPort" : "53", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "53", "ToPort" : "53", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "9389", "ToPort" : "9389", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "88", "ToPort" : "88", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "5355", "ToPort" : "5355", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "137", "ToPort" : "137", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "139", "ToPort" : "139", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "5722", "ToPort" : "5722", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+
+					{"IpProtocol" : "udp", "FromPort" : "123", "ToPort" : "123", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "135", "ToPort" : "135", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "9389", "ToPort" : "9389", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "138", "ToPort" : "138", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "445", "ToPort" : "445", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "445", "ToPort" : "445", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "464", "ToPort" : "464", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "464", "ToPort" : "464", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "49152", "ToPort" : "65535", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "49152", "ToPort" : "65535", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "389", "ToPort" : "389", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "389", "ToPort" : "389", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "636", "ToPort" : "636", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3268", "ToPort" : "3268", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3269", "ToPort" : "3269", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "53", "ToPort" : "53", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "53", "ToPort" : "53", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "tcp", "FromPort" : "88", "ToPort" : "88", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+					{"IpProtocol" : "udp", "FromPort" : "88", "ToPort" : "88", "SourceSecurityGroupId" : { "Ref" : "DomainMemberSG" } },
+
+					{"IpProtocol" : "tcp", "FromPort" : "3389", "ToPort" : "3389", "CidrIp" : { "Ref" : "DMZ1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3389", "ToPort" : "3389", "CidrIp" : { "Ref" : "DMZ2CIDR" } },
+					{ "IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : { "Ref" : "DMZ1CIDR" } },
+					{ "IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : { "Ref" : "DMZ2CIDR" } }
+				]
+			}      
+		},
+		"DomainMemberSG" : {
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Domain Members",
+				"VpcId" : { "Ref" : "VPC" },
+				"SecurityGroupIngress" : [
+					{"IpProtocol" : "tcp", "FromPort" : "53", "ToPort" : "53", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "53", "ToPort" : "53", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "49152", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "49152", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "53", "ToPort" : "53", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "53", "ToPort" : "53", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "49152", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "udp", "FromPort" : "49152", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3389", "ToPort" : "3389", "CidrIp" : { "Ref" : "DMZ1CIDR" } },
+					{"IpProtocol" : "tcp", "FromPort" : "3389", "ToPort" : "3389", "CidrIp" : { "Ref" : "DMZ2CIDR" } }
+				]
+			}      
+		},
+		"NATSecurityGroup" : {
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Enables SSH access to NAT1 in AZ1 via port 22 and outbound internet access via private subnets",
+				"VpcId" : {"Ref" : "VPC"},
+				"SecurityGroupIngress" : [ 
+					{ "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : "0.0.0.0/0" },
+					{ "IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : "0.0.0.0/0" },
+					{ "IpProtocol" : "-1", "FromPort" : "1", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{ "IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : { "Ref" : "PrivSub1CIDR" } },
+					{ "IpProtocol" : "-1", "FromPort" : "1", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{ "IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : { "Ref" : "PrivSub2CIDR" } },
+					{ "IpProtocol" : "-1", "FromPort" : "1", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub3CIDR" } },
+					{ "IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : { "Ref" : "PrivSub3CIDR" } },
+					{ "IpProtocol" : "-1", "FromPort" : "1", "ToPort" : "65535", "CidrIp" : { "Ref" : "PrivSub4CIDR" } },
+					{ "IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : { "Ref" : "PrivSub4CIDR" } }
+				]
+			}
+		},
+		"RDGWSecurityGroup" : {
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Enable RDP access from the Internet",
+				"VpcId" : {"Ref" : "VPC"},
+				"SecurityGroupIngress" : [ 
+					{"IpProtocol" : "tcp", "FromPort" : "3389", "ToPort" : "3389", "CidrIp" : "0.0.0.0/0" },
+					{"IpProtocol" : "icmp", "FromPort" : "-1", "ToPort" : "-1", "CidrIp" : "0.0.0.0/0" }
+				]
+			}
+		}
+	},
+	"Outputs" : {
+		"RDGW1ElasticIP" : {
+			"Value" : { "Ref" : "RdgwEIP" },
+			"Description" : "Elastic IP address of the first Remote Desktop Gateway (RDGW1) in AZ1"
+		},
+		"RDGW2ElasticIP" : {
+			"Value" : { "Ref" : "Rdgw2EIP" },
+			"Description" : "Elastic IP address of the second Remote Desktop Gateway (RDGW2) in AZ2"
+		},
+		"DomainAdmin" : {
+			"Value" : { "Fn::Join" : ["", [{ "Ref" : "DomainNetBIOSName" }, "\\StackAdmin" ]] },
+			"Description" : "Domain administrator account"
+		}
+	}  
+}
