@@ -1,0 +1,2654 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Description"              : "**Version 1.0** ***Exchange2010-Mailbox-Servers-PIOPS*** STEP-2 This template launches and installs 2 Windows Server 2008 R2 based Exchange Mailbox servers into seperate subnets and Availability Zones inside a VPC. The Mailbox servers are deployed in a Server Multi-Role configuration (MBX, CAS, HT). The storage attched to the mailbox servers with this template is designed to provide a 5 GB mailboxe and personal archive size limit for up to 250 mailboxes. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
+    "Parameters"               : {
+        "KeyPairName" : {
+            "Description" : "Public/private key pairs allow you to securely connect to your instance after it launches",
+            "Type"        : "String"
+        },
+        "MBServerInstanceType" : {
+            "Description" : "Amazon EC2 instance type for the Mailbox Servers",
+            "Type"        : "String",
+            "Default"     : "m1.xlarge",
+            "AllowedValues" : [
+                "m1.xlarge",
+                "c1.xlarge"
+            ],
+            "ConstraintDescription" : "Only EBS-optimized instance types with 4 Instance Storage drives allowed when launching this template. EBS-optimized instances deliver dedicated throughput between Amazon EC2 and Amazon EBS, with options for 500 Mbps and 1000 Mbps depending on the instance type used."
+        },
+        "DomainDNSName"        : {
+            "Description" : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.com",
+            "Type"        : "String",
+            "Default"     : "contoso.com",
+            "MinLength"   : "3",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "DomainNetBIOSName"    : {
+            "Description" : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. CORP",
+            "Type"        : "String",
+            "Default"     : "contoso",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "EX01NetBIOSName"      : {
+            "Description" : "NetBIOS name of the 1st Mailbox Server (up to 15 characters)",
+            "Type"        : "String",
+            "Default"     : "EX01",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "EX02NetBIOSName"      : {
+            "Description" : "NetBIOS name of the 2nd Mailbox Server (up to 15 characters)",
+            "Type"        : "String",
+            "Default"     : "EX02",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "DomainAdminUser"      : {
+            "Description" : "User name for the account that will be added as Domain Administrator. This is separate from the default \"Administrator\" account",
+            "Type"        : "String",
+            "Default"     : "StackAdmin",
+            "MinLength"   : "5",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]*"
+        },
+        "DomainAdminPassword"  : {
+            "Description" : "Password for the domain admin user. Must be at least 8 characters containing letters, numbers and symbols",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "true",
+            "Default"        : "Password123"
+        },
+        "ExternalCASServerDomain" : {
+            "Description" : "Configure Client Access Server external domain (e.g., mail.contoso.com)",
+            "Type"        : "String"
+        },
+        "ADServer1PrivateIp"      : {
+            "Description" : "Fixed private IP for the first Active Directory server",
+            "Type"        : "String",
+            "Default"     : "10.0.1.10"
+        },
+        "ADServer2PrivateIp"      : {
+            "Description" : "Fixed private IP for the second Active Directory server",
+            "Type"        : "String",
+            "Default"     : "10.0.5.10"
+        },
+        "SGInternalID"            : {
+            "Description" : "ID of the VPC Internal Security Group (e.g., sg-7f16e910)",
+            "Type"        : "String"
+        },
+        "VPC"                     : {
+            "Description" : "ID of the VPC (e.g., vpc-0343606e)",
+            "Type"        : "String"
+        },
+        "MB1ServerSubnet"         : {
+            "Description" : "ID of the subnet you want to provision the 1st Mailbox Servers into (e.g., subnet-a0246dcd)",
+            "Type"        : "String"
+        },
+        "MB2ServerSubnet"         : {
+            "Description" : "ID of the subnet you want to provision the 2nd Mailbox Servers into (e.g., subnet-a0246dcd)",
+            "Type"        : "String"
+        },
+        "ReplicationSubnet1"      : {
+            "Description" : "ID of the subnet you want to provision the 1st ENI for the dedicated replication network into (e.g., subnet-a0246dcd)",
+            "Type"        : "String"
+        },
+        "ReplicationSubnet2"      : {
+            "Description" : "ID of the subnet you want to provision the 2nd ENI for the dedicated replication network into (e.g., subnet-a0246dcd)",
+            "Type"        : "String"
+        },
+        "DBVolumePIOPS"           : {
+            "Description" : "The number of I/O operations per second (IOPS) that the volume supports. This can be any integer value from 1 to 4000.",
+            "Type"        : "Number",
+            "Default"     : "200",
+            "MinValue"    : "1",
+            "MaxValue"    : "4000"
+        }
+    },
+    "Mappings"                 : {
+        "AWSInstanceType2Arch" : {
+            "m1.small" : {
+                "Arch" : "64"
+            },
+            "m1.medium" : {
+                "Arch" : "64"
+            },
+            "m1.large"  : {
+                "Arch" : "64"
+            },
+            "m1.xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.2xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.4xlarge" : {
+                "Arch" : "64"
+            },
+            "m3.xlarge"  : {
+                "Arch" : "64"
+            },
+            "c1.medium"  : {
+                "Arch" : "64"
+            },
+            "c1.xlarge"  : {
+                "Arch" : "64"
+            }
+        },
+        "AWSRegionArch2AMI"    : {
+            "us-east-1" : {
+                "64" : "ami-7f236a16"
+            },
+            "eu-west-1" : {
+                "64" : "ami-423dd835"
+            },
+            "ap-northeast-1" : {
+                "64" : "ami-69dd4168"
+            },
+            "us-west-1"      : {
+                "64" : "ami-d0261395"
+            },
+            "us-west-2"      : {
+                "64" : "ami-54de4164"
+            },
+            "ap-southeast-1" : {
+                "64" : "ami-048dc656"
+            },
+            "ap-southeast-2" : {
+                "64" : "ami-f59e03cf"
+            },
+            "sa-east-1"      : {
+                "64" : "ami-57d4734a"
+            }
+        },
+        "ReplicationSubnetIPs" : {
+            "MB1" : {
+                "IP" : "10.0.2.10"
+            },
+            "MB2" : {
+                "IP" : "10.0.6.10"
+            }
+        },
+        "MapiSubnetIPs"        : {
+            "MB1" : {
+                "IP" : "10.0.3.10"
+            },
+            "MB2" : {
+                "IP" : "10.0.7.10"
+            }
+        },
+        "SubnetConfig"         : {
+            "VPC" : {
+                "CIDR" : "10.0.0.0/16"
+            },
+            "DC1" : {
+                "CIDR" : "10.0.1.0/24"
+            },
+            "Repl1" : {
+                "CIDR" : "10.0.2.0/24"
+            },
+            "Mapi1" : {
+                "CIDR" : "10.0.3.0/24"
+            },
+            "Client1" : {
+                "CIDR" : "10.0.4.0/24"
+            },
+            "DC2"     : {
+                "CIDR" : "10.0.5.0/24"
+            },
+            "Repl2"   : {
+                "CIDR" : "10.0.6.0/24"
+            },
+            "Mapi2"   : {
+                "CIDR" : "10.0.7.0/24"
+            },
+            "Client2" : {
+                "CIDR" : "10.0.8.0/24"
+            },
+            "Public1" : {
+                "CIDR" : "10.0.9.0/24"
+            },
+            "Public2" : {
+                "CIDR" : "10.0.10.0/24"
+            }
+        }
+    },
+    "Resources"                : {
+        "MB1EIP" : {
+            "Type" : "AWS::EC2::EIP",
+            "Properties" : {
+                "Domain" : "vpc"
+            }
+        },
+        "MB2EIP" : {
+            "Type" : "AWS::EC2::EIP",
+            "Properties" : {
+                "Domain" : "vpc"
+            }
+        },
+        "AssociateMB1EIP" : {
+            "Type" : "AWS::EC2::EIPAssociation",
+            "Properties" : {
+                "AllocationId" : {
+                    "Fn::GetAtt" : [
+                        "MB1EIP",
+                        "AllocationId"
+                    ]
+                },
+                "NetworkInterfaceId" : {
+                    "Ref" : "Mapi1ENI"
+                }
+            }
+        },
+        "Mapi1ENI"        : {
+            "Type" : "AWS::EC2::NetworkInterface",
+            "Properties" : {
+                "Tags" : [
+                    {
+                        "Key" : "Name",
+                        "Value" : "MAPI Network 1 Interface"
+                    }
+                ],
+                "Description" : "MAPI Network 1 Interface",
+                "GroupSet"    : [
+                    {
+                        "Ref" : "SGInternalID"
+                    },
+                    {
+                        "Ref" : "SMTPSecurityGroup"
+                    },
+                    {
+                        "Ref" : "WebCasSecurityGroup"
+                    }
+                ],
+                "SubnetId"    : {
+                    "Ref" : "MB1ServerSubnet"
+                },
+                "PrivateIpAddress" : {
+                    "Fn::FindInMap" : [
+                        "MapiSubnetIPs",
+                        "MB1",
+                        "IP"
+                    ]
+                }
+            }
+        },
+        "AssociateMB2EIP" : {
+            "Type" : "AWS::EC2::EIPAssociation",
+            "Properties" : {
+                "AllocationId" : {
+                    "Fn::GetAtt" : [
+                        "MB2EIP",
+                        "AllocationId"
+                    ]
+                },
+                "NetworkInterfaceId" : {
+                    "Ref" : "Mapi2ENI"
+                }
+            }
+        },
+        "Mapi2ENI"        : {
+            "Type" : "AWS::EC2::NetworkInterface",
+            "Properties" : {
+                "Tags" : [
+                    {
+                        "Key" : "Name",
+                        "Value" : "MAPI Network 2 Interface"
+                    }
+                ],
+                "Description" : "MAPI Network 2 Interface",
+                "GroupSet"    : [
+                    {
+                        "Ref" : "SGInternalID"
+                    },
+                    {
+                        "Ref" : "SMTPSecurityGroup"
+                    },
+                    {
+                        "Ref" : "WebCasSecurityGroup"
+                    }
+                ],
+                "SubnetId"    : {
+                    "Ref" : "MB2ServerSubnet"
+                },
+                "PrivateIpAddress" : {
+                    "Fn::FindInMap" : [
+                        "MapiSubnetIPs",
+                        "MB2",
+                        "IP"
+                    ]
+                }
+            }
+        },
+        "Repl1ENI"        : {
+            "Type" : "AWS::EC2::NetworkInterface",
+            "Properties" : {
+                "Tags" : [
+                    {
+                        "Key" : "Name",
+                        "Value" : "MB1 Replication Network Interface"
+                    }
+                ],
+                "Description" : "MB1 Replication Network Interface",
+                "GroupSet"    : [
+                    {
+                        "Ref" : "SGDAG"
+                    }
+                ],
+                "SubnetId"    : {
+                    "Ref" : "ReplicationSubnet1"
+                },
+                "PrivateIpAddress" : {
+                    "Fn::FindInMap" : [
+                        "ReplicationSubnetIPs",
+                        "MB1",
+                        "IP"
+                    ]
+                }
+            }
+        },
+        "Repl2ENI"        : {
+            "Type" : "AWS::EC2::NetworkInterface",
+            "Properties" : {
+                "Tags" : [
+                    {
+                        "Key" : "Name",
+                        "Value" : "MB2 Replication Network Interface"
+                    }
+                ],
+                "Description" : "MB2 Replication Network Interface",
+                "GroupSet"    : [
+                    {
+                        "Ref" : "SGDAG"
+                    }
+                ],
+                "SubnetId"    : {
+                    "Ref" : "ReplicationSubnet2"
+                },
+                "PrivateIpAddress" : {
+                    "Fn::FindInMap" : [
+                        "ReplicationSubnetIPs",
+                        "MB2",
+                        "IP"
+                    ]
+                }
+            }
+        },
+        "MB1WaitCondition" : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "EX02",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "MB1WaitHandle"
+                },
+                "Timeout" : "4200"
+            }
+        },
+        "MB1WaitHandle"    : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "MB2WaitCondition" : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "EX02",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "MB2WaitHandle"
+                },
+                "Timeout" : "4200"
+            }
+        },
+        "MB2WaitHandle"    : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "EX01"             : {
+            "Type" : "AWS::EC2::Instance",
+            "Metadata" : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "createdisk",
+                            "rename",
+                            "join",
+                            "setpagefile",
+                            "exchange",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.EX01.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r EX01",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\RenameComputer.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ($name)",
+                                            "\n",
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename($name)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1 ",
+                                            {
+                                                "Ref" : "EX01NetBIOSName"
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-reboot"                                   : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "shutdown -r -t 1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\SetDNSOnNICs.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param ",
+                                            "\n",
+                                            "(",
+                                            "\n",
+                                            "$Gateway1,",
+                                            "\n",
+                                            "$Gateway2,",
+                                            "\n",
+                                            "$PrivateIP",
+                                            "\n",
+                                            ")",
+                                            "\n",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"} | Sort-Object index",
+                                            "\n",
+                                            "$index0 = 0",
+                                            "\n",
+                                            "Foreach($NIC in $NICs)",
+                                            "\n",
+                                            "{",
+                                            "\n",
+                                            "$index1 = $Nic.Index",
+                                            "\n",
+                                            "IF($index1 -ge $index0)",
+                                            "\n",
+                                            "{",
+                                            "\n",
+                                            "$DNSServers = \"$Gateway1\",\"$Gateway2\"",
+                                            "\n",
+                                            "$NIC.SetDNSServerSearchOrder($DNSServers)",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration($TRUE)",
+                                            "\n",
+                                            "$index0 = 9999",
+                                            "\n",
+                                            "}",
+                                            "\n",
+                                            "ELSE",
+                                            "\n",
+                                            "{",
+                                            "\n",
+                                            "$NIC.EnableStatic($PrivateIP, \"255.255.255.0\")",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration($FALSE,$FALSE)",
+                                            "\n",
+                                            "}",
+                                            "\n",
+                                            "}"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\AssignStaticReplicationRoute.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param ",
+                                            "(",
+                                            "$ReplicationNetwork",
+                                            ")",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"} | Sort-Object index",
+                                            "$index0 = 0",
+                                            "Foreach($NIC in $NICs)",
+                                            "{",
+                                            "$index1 = $Nic.Index",
+                                            "IF($index1 -ge $index0)",
+                                            "{",
+                                            "$index0 = 9999",
+                                            "}",
+                                            "ELSE",
+                                            "{",
+                                            "$Index = $NIC.Index",
+                                            "$ipaddress = $NIC.IPAddress | Sort-Object",
+                                            "$ipa = $ipaddress[0]",
+                                            "$ipasplit = $ipa.split(\".\")",
+                                            "$IP = 1",
+                                            "$DefaultGatewayIP = $($ipasplit[0] + \".\" +  $ipasplit[1] + \".\" + $ipasplit[2]  + \".\" + $ip)",
+                                            "$interfaces = Get-WmiObject Win32_NetworkAdapter | where{$_.DeviceID -eq $Index}",
+                                            "$ConnectionID = $interfaces.NetConnectionID",
+                                            "Netsh interface ipv4 add route $ReplicationNetwork \"$ConnectionID\" $DefaultGatewayIP",
+                                            "}",
+                                            "}"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-set-dns-on-nics" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\SetDNSOnNICs.ps1 ",
+                                            {
+                                                "Ref" : "ADServer1PrivateIp"
+                                            },
+                                            " ",
+                                            {
+                                                "Ref" : "ADServer2PrivateIp"
+                                            },
+                                            " ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "ReplicationSubnetIPs",
+                                                    "MB1",
+                                                    "IP"
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-set-static-route-on-nics" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\AssignStaticReplicationRoute.ps1 ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Repl2",
+                                                    "CIDR"
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "3-join-domain"              : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "NETDOM join localhost /Domain:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /userd:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /passwordd:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " /reboot"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "4-add-local-admin"          : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "createdisk" : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\EphDisk1.txt" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "select disk=1 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=3 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=4 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=5 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=6 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=7 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=8 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=9 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=10 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=11 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=1 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=1 ",
+                                            "\n",
+                                            "select volume=1 ",
+                                            "\n",
+                                            "assign letter=D ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"PAGE Volume\"",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=2 ",
+                                            "\n",
+                                            "select volume=2 ",
+                                            "\n",
+                                            "assign letter=E ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"OSTemp Volume\"",
+                                            "\n",
+                                            "select disk=3 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=3 ",
+                                            "\n",
+                                            "select volume=3 ",
+                                            "\n",
+                                            "assign letter=F ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"APPS Volume\"",
+                                            "\n",
+                                            "select disk=4 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=4 ",
+                                            "\n",
+                                            "select volume=4 ",
+                                            "\n",
+                                            "assign letter=G ",
+                                            "\n",
+                                            "format fs=ntfs quick unit=65536 label=\"MB1 Volume\"",
+                                            "\n",
+                                            "select disk=5 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=5 ",
+                                            "\n",
+                                            "select volume=5 ",
+                                            "\n",
+                                            "assign letter=H ",
+                                            "\n",
+                                            "format fs=ntfs quick unit=65536 label=\"MB2 Volume\"",
+                                            "\n",
+                                            "select disk=6 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=6 ",
+                                            "\n",
+                                            "select volume=6 ",
+                                            "\n",
+                                            "assign letter=I ",
+                                            "\n",
+                                            "format fs=ntfs quick unit=65536 label=\"MB3 Volume\"",
+                                            "\n",
+                                            "select disk=7 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=7 ",
+                                            "\n",
+                                            "select volume=7 ",
+                                            "\n",
+                                            "assign letter=J ",
+                                            "\n",
+                                            "format fs=ntfs quick unit=65536 label=\"MB4 Volume\"",
+                                            "\n",
+                                            "select disk=8 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=8 ",
+                                            "\n",
+                                            "select volume=8 ",
+                                            "\n",
+                                            "assign letter=K ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"MBRestore Volume\"",
+                                            "\n",
+                                            "exit",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\EphDisk1.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "diskpart /s C:\\cfn\\scripts\\EphDisk1.txt",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-perform-EphDisk1" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\scripts\\EphDisk1.bat"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "setpagefile" : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\DownloadSetPageFile.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/AdjustVirtualMemoryPagingFileSize.psm1 -Destination c:\\cfn\\scripts\\AdjustVirtualMemoryPagingFileSize.psm1",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DeletePageFile.ps1"      : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module C:\\cfn\\scripts\\AdjustVirtualMemoryPagingFileSize.psm1",
+                                            "\n",
+                                            "Set-OSCVirtualMemory -None -DriveLetter \"C:\",\"D:\""
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\SetPageFile.ps1"         : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module C:\\cfn\\scripts\\AdjustVirtualMemoryPagingFileSize.psm1",
+                                            "\n",
+                                            "Set-OSCVirtualMemory -DriveLetter \"D:\" -AutoConfigure -Reboot"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-perform-downloadsetpagefile" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadSetPageFile.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-perform-deletepagefile"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DeletePageFile.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "3-perform-setpagefile"         : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\SetPageFile.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "exchange"    : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\DownloadExchange2010.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "md c:\\MicrosoftDownloads\\Exchange2010 ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source http://download.microsoft.com/download/3/0/3/30383778-FB6F-429A-9F65-AF1FE57D7017/Exchange2010-SP3-x64.exe -Destination c:\\MicrosoftDownloads\\Exchange2010\\Exchange2010-SP3-x64.exe",
+                                            "\n",
+                                            "md c:\\MicrosoftDownloads\\Exchange2010\\2010FilterPack ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source http://download.microsoft.com/download/0/A/2/0A28BBFA-CBFA-4C03-A739-30CCA5E21659/FilterPack64bit.exe -Destination c:\\MicrosoftDownloads\\Exchange2010\\2010FilterPack\\FilterPackx64.exe",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\Users\\Default\\Desktop\\InstallExch2010.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "sc.exe config NetTcpPortSharing start= auto",
+                                            "\n",
+                                            "C:\\MicrosoftDownloads\\Exchange2010\\setup.com ",
+                                            "/m:Install ",
+                                            "/r:M,C,HT ",
+                                            "/TargetDir:\"F:\\Exchange2010\" ",
+                                            "/OrganizationName:MyOrg ",
+                                            "/ExternalCASServerDomain:",
+                                            {
+                                                "Ref" : "ExternalCASServerDomain"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\ExchangePreReq.ps1"            : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "Import-Module ServerManager",
+                                            "\n",
+                                            "Add-WindowsFeature NET-Framework, RSAT-ADDS, Web-Server, NET-HTTP-Activation, `",
+                                            "\n",
+                                            "RPC-over-HTTP-proxy, RSAT-Web-Server, WAS-Process-Model, Web-Basic-Auth, `",
+                                            "\n",
+                                            "Web-Digest-Auth, Web-Dyn-Compression, Web-Metabase, Web-Net-Ext, `",
+                                            "\n",
+                                            "Web-ISAPI-Ext, Web-Lgcy-Mgmt-Console, Web-Windows-Auth, Web-WMI, Web-Asp-Net",
+                                            "\n",
+                                            "Restart-Computer",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-DownloadExchange2010" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadExchange2010.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-execute-command-InstallFilterPack"       : {
+                                "command" : "c:\\MicrosoftDownloads\\Exchange2010\\2010FilterPack\\FilterPackx64.exe /passive /norestart"
+                            },
+                            "3-execute-command-UnpackExchangeInstaller" : {
+                                "command" : "c:\\MicrosoftDownloads\\Exchange2010\\Exchange2010-SP3-x64.exe /extract:C:\\MicrosoftDownloads\\Exchange2010 /passive"
+                            },
+                            "4-execute-powershell-script-ExchangePreReq" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\ExchangePreReq.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "finalize"    : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\DownloadWSFCPorts.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/OpenWSFCPorts.bat -Destination C:\\cfn\\scripts\\OpenWSFCPorts.bat",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\WUSettings.ps1"        : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "$WUSettings = (New-Object -com \"Microsoft.Update.AutoUpdate\").Settings",
+                                            "\n",
+                                            "$WUSettings.NotificationLevel=3",
+                                            "\n",
+                                            "$WUSettings.save()"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-DownloadWSFCPorts" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-open-WSFC-ports"                      : {
+                                "command" : "C:\\cfn\\scripts\\OpenWSFCPorts.bat"
+                            },
+                            "3-execute-powershell-WUSettings"        : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\WUSettings.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-signal-success"                       : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "MB1WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Ref" : "MBServerInstanceType"
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Ref" : "MBServerInstanceType"
+                },
+                "NetworkInterfaces" : [
+                    {
+                        "NetworkInterfaceId" : {
+                            "Ref" : "Mapi1ENI"
+                        },
+                        "DeviceIndex"        : "0"
+                    },
+                    {
+                        "NetworkInterfaceId" : {
+                            "Ref" : "Repl1ENI"
+                        },
+                        "DeviceIndex"        : "1"
+                    }
+                ],
+                "Tags"              : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "EX01NetBIOSName"
+                        }
+                    }
+                ],
+                "BlockDeviceMappings" : [
+                    {
+                        "DeviceName" : "/dev/sda1",
+                        "Ebs"        : {
+                            "VolumeSize" : "80"
+                        }
+                    },
+                    {
+                        "DeviceName" : "/dev/xvdb",
+                        "VirtualName" : "ephemeral0"
+                    }
+                ],
+                "EbsOptimized"        : "true",
+                "Volumes"             : [
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB1Volume1"
+                        },
+                        "Device"   : "/dev/xvdf"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB1Volume2"
+                        },
+                        "Device"   : "/dev/xvdg"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB1Volume3"
+                        },
+                        "Device"   : "/dev/xvdh"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB1Volume4"
+                        },
+                        "Device"   : "/dev/xvdi"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB1Volume5"
+                        },
+                        "Device"   : "/dev/xvdj"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB1Volume6"
+                        },
+                        "Device"   : "/dev/xvdk"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB1Volume7"
+                        },
+                        "Device"   : "/dev/xvdl"
+                    }
+                ],
+                "KeyName"             : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"            : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r EX01 ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "EX02"             : {
+            "Type" : "AWS::EC2::Instance",
+            "DependsOn" : "EX01",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "createdisk",
+                            "rename",
+                            "join",
+                            "setpagefile",
+                            "exchange",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.EX02.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r EX02",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\RenameComputer.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ($name)",
+                                            "\n",
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename($name)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1 ",
+                                            {
+                                                "Ref" : "EX02NetBIOSName"
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-reboot"                                   : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "shutdown -r -t 1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\SetDNSOnNICs.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param ",
+                                            "\n",
+                                            "(",
+                                            "\n",
+                                            "$Gateway1,",
+                                            "\n",
+                                            "$Gateway2,",
+                                            "\n",
+                                            "$PrivateIP",
+                                            "\n",
+                                            ")",
+                                            "\n",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"} | Sort-Object index",
+                                            "\n",
+                                            "$index0 = 0",
+                                            "\n",
+                                            "Foreach($NIC in $NICs)",
+                                            "\n",
+                                            "{",
+                                            "\n",
+                                            "$index1 = $Nic.Index",
+                                            "\n",
+                                            "IF($index1 -ge $index0)",
+                                            "\n",
+                                            "{",
+                                            "\n",
+                                            "$DNSServers = \"$Gateway1\",\"$Gateway2\"",
+                                            "\n",
+                                            "$NIC.SetDNSServerSearchOrder($DNSServers)",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration($TRUE)",
+                                            "\n",
+                                            "$index0 = 9999",
+                                            "\n",
+                                            "}",
+                                            "\n",
+                                            "ELSE",
+                                            "\n",
+                                            "{",
+                                            "\n",
+                                            "$NIC.EnableStatic($PrivateIP, \"255.255.255.0\")",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration($FALSE,$FALSE)",
+                                            "\n",
+                                            "}",
+                                            "\n",
+                                            "}"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\AssignStaticReplicationRoute.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param ",
+                                            "(",
+                                            "$ReplicationNetwork",
+                                            ")",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"} | Sort-Object index",
+                                            "$index0 = 0",
+                                            "Foreach($NIC in $NICs)",
+                                            "{",
+                                            "$index1 = $Nic.Index",
+                                            "IF($index1 -ge $index0)",
+                                            "{",
+                                            "$index0 = 9999",
+                                            "}",
+                                            "ELSE",
+                                            "{",
+                                            "$Index = $NIC.Index",
+                                            "$ipaddress = $NIC.IPAddress | Sort-Object",
+                                            "$ipa = $ipaddress[0]",
+                                            "$ipasplit = $ipa.split(\".\")",
+                                            "$IP = 1",
+                                            "$DefaultGatewayIP = $($ipasplit[0] + \".\" +  $ipasplit[1] + \".\" + $ipasplit[2]  + \".\" + $ip)",
+                                            "$interfaces = Get-WmiObject Win32_NetworkAdapter | where{$_.DeviceID -eq $Index}",
+                                            "$ConnectionID = $interfaces.NetConnectionID",
+                                            "Netsh interface ipv4 add route $ReplicationNetwork \"$ConnectionID\" $DefaultGatewayIP",
+                                            "}",
+                                            "}"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-set-dns-on-nics" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\SetDNSOnNICs.ps1 ",
+                                            {
+                                                "Ref" : "ADServer2PrivateIp"
+                                            },
+                                            " ",
+                                            {
+                                                "Ref" : "ADServer1PrivateIp"
+                                            },
+                                            " ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "ReplicationSubnetIPs",
+                                                    "MB2",
+                                                    "IP"
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-set-static-route-on-nics" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\AssignStaticReplicationRoute.ps1 ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Repl1",
+                                                    "CIDR"
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "3-join-domain"              : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "NETDOM join localhost /Domain:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /userd:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /passwordd:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " /reboot"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "4-add-local-admin"          : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "createdisk" : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\EphDisk1.txt" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "select disk=1 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=3 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=4 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=5 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=6 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=7 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=8 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=9 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=10 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=11 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=1 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=1 ",
+                                            "\n",
+                                            "select volume=1 ",
+                                            "\n",
+                                            "assign letter=D ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"PAGE Volume\"",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=2 ",
+                                            "\n",
+                                            "select volume=2 ",
+                                            "\n",
+                                            "assign letter=E ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"OSTemp Volume\"",
+                                            "\n",
+                                            "select disk=3 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=3 ",
+                                            "\n",
+                                            "select volume=3 ",
+                                            "\n",
+                                            "assign letter=F ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"APPS Volume\"",
+                                            "\n",
+                                            "select disk=4 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=4 ",
+                                            "\n",
+                                            "select volume=4 ",
+                                            "\n",
+                                            "assign letter=G ",
+                                            "\n",
+                                            "format fs=ntfs quick unit=65536 label=\"MB1 Volume\"",
+                                            "\n",
+                                            "select disk=5 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=5 ",
+                                            "\n",
+                                            "select volume=5 ",
+                                            "\n",
+                                            "assign letter=H ",
+                                            "\n",
+                                            "format fs=ntfs quick unit=65536 label=\"MB2 Volume\"",
+                                            "\n",
+                                            "select disk=6 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=6 ",
+                                            "\n",
+                                            "select volume=6 ",
+                                            "\n",
+                                            "assign letter=I ",
+                                            "\n",
+                                            "format fs=ntfs quick unit=65536 label=\"MB3 Volume\"",
+                                            "\n",
+                                            "select disk=7 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=7 ",
+                                            "\n",
+                                            "select volume=7 ",
+                                            "\n",
+                                            "assign letter=J ",
+                                            "\n",
+                                            "format fs=ntfs quick unit=65536 label=\"MB4 Volume\"",
+                                            "\n",
+                                            "select disk=8 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=8 ",
+                                            "\n",
+                                            "select volume=8 ",
+                                            "\n",
+                                            "assign letter=K ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"MBRestore Volume\"",
+                                            "\n",
+                                            "exit",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\EphDisk1.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "diskpart /s C:\\cfn\\scripts\\EphDisk1.txt",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-perform-EphDisk1" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\scripts\\EphDisk1.bat"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "setpagefile" : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\DownloadSetPageFile.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/AdjustVirtualMemoryPagingFileSize.psm1 -Destination c:\\cfn\\scripts\\AdjustVirtualMemoryPagingFileSize.psm1",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DeletePageFile.ps1"      : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module C:\\cfn\\scripts\\AdjustVirtualMemoryPagingFileSize.psm1",
+                                            "\n",
+                                            "Set-OSCVirtualMemory -None -DriveLetter \"C:\",\"D:\""
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\SetPageFile.ps1"         : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module C:\\cfn\\scripts\\AdjustVirtualMemoryPagingFileSize.psm1",
+                                            "\n",
+                                            "Set-OSCVirtualMemory -DriveLetter \"D:\" -AutoConfigure -Reboot"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-perform-downloadsetpagefile" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadSetPageFile.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-perform-deletepagefile"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DeletePageFile.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "3-perform-setpagefile"         : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\SetPageFile.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "exchange"    : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\DownloadExchange2010.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "md c:\\MicrosoftDownloads\\Exchange2010 ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source http://download.microsoft.com/download/3/0/3/30383778-FB6F-429A-9F65-AF1FE57D7017/Exchange2010-SP3-x64.exe -Destination c:\\MicrosoftDownloads\\Exchange2010\\Exchange2010-SP3-x64.exe",
+                                            "\n",
+                                            "md c:\\MicrosoftDownloads\\Exchange2010\\2010FilterPack ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source http://download.microsoft.com/download/0/A/2/0A28BBFA-CBFA-4C03-A739-30CCA5E21659/FilterPack64bit.exe -Destination c:\\MicrosoftDownloads\\Exchange2010\\2010FilterPack\\FilterPackx64.exe",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\Users\\Default\\Desktop\\InstallExch2010.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "sc.exe config NetTcpPortSharing start= auto",
+                                            "\n",
+                                            "C:\\MicrosoftDownloads\\Exchange2010\\setup.com ",
+                                            "/m:Install ",
+                                            "/r:M,C,HT ",
+                                            "/TargetDir:\"F:\\Exchange2010\" ",
+                                            "/OrganizationName:MyOrg ",
+                                            "/ExternalCASServerDomain:",
+                                            {
+                                                "Ref" : "ExternalCASServerDomain"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\ExchangePreReq.ps1"            : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "Import-Module ServerManager",
+                                            "\n",
+                                            "Add-WindowsFeature NET-Framework, RSAT-ADDS, Web-Server, NET-HTTP-Activation, `",
+                                            "\n",
+                                            "RPC-over-HTTP-proxy, RSAT-Web-Server, WAS-Process-Model, Web-Basic-Auth, `",
+                                            "\n",
+                                            "Web-Digest-Auth, Web-Dyn-Compression, Web-Metabase, Web-Net-Ext, `",
+                                            "\n",
+                                            "Web-ISAPI-Ext, Web-Lgcy-Mgmt-Console, Web-Windows-Auth, Web-WMI, Web-Asp-Net",
+                                            "\n",
+                                            "Restart-Computer",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-DownloadExchange2010" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadExchange2010.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-execute-command-InstallFilterPack"       : {
+                                "command" : "c:\\MicrosoftDownloads\\Exchange2010\\2010FilterPack\\FilterPackx64.exe /passive /norestart"
+                            },
+                            "3-execute-command-UnpackExchangeInstaller" : {
+                                "command" : "c:\\MicrosoftDownloads\\Exchange2010\\Exchange2010-SP3-x64.exe /extract:C:\\MicrosoftDownloads\\Exchange2010 /passive"
+                            },
+                            "4-execute-powershell-script-ExchangePreReq" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\ExchangePreReq.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "finalize"    : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\DownloadWSFCPorts.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/OpenWSFCPorts.bat -Destination C:\\cfn\\scripts\\OpenWSFCPorts.bat",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\WUSettings.ps1"        : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "$WUSettings = (New-Object -com \"Microsoft.Update.AutoUpdate\").Settings",
+                                            "\n",
+                                            "$WUSettings.NotificationLevel=3",
+                                            "\n",
+                                            "$WUSettings.save()"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-DownloadWSFCPorts" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-open-WSFC-ports"                      : {
+                                "command" : "C:\\cfn\\scripts\\OpenWSFCPorts.bat"
+                            },
+                            "3-execute-powershell-WUSettings"        : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\WUSettings.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-signal-success"                       : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "MB2WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Ref" : "MBServerInstanceType"
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Ref" : "MBServerInstanceType"
+                },
+                "NetworkInterfaces" : [
+                    {
+                        "NetworkInterfaceId" : {
+                            "Ref" : "Mapi2ENI"
+                        },
+                        "DeviceIndex"        : "0"
+                    },
+                    {
+                        "NetworkInterfaceId" : {
+                            "Ref" : "Repl2ENI"
+                        },
+                        "DeviceIndex"        : "1"
+                    }
+                ],
+                "Tags"              : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "EX02NetBIOSName"
+                        }
+                    }
+                ],
+                "BlockDeviceMappings" : [
+                    {
+                        "DeviceName" : "/dev/sda1",
+                        "Ebs"        : {
+                            "VolumeSize" : "80"
+                        }
+                    },
+                    {
+                        "DeviceName" : "/dev/xvdb",
+                        "VirtualName" : "ephemeral0"
+                    }
+                ],
+                "EbsOptimized"        : "true",
+                "Volumes"             : [
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB2Volume1"
+                        },
+                        "Device"   : "/dev/xvdf"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB2Volume2"
+                        },
+                        "Device"   : "/dev/xvdg"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB2Volume3"
+                        },
+                        "Device"   : "/dev/xvdh"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB2Volume4"
+                        },
+                        "Device"   : "/dev/xvdi"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB2Volume5"
+                        },
+                        "Device"   : "/dev/xvdj"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB2Volume6"
+                        },
+                        "Device"   : "/dev/xvdk"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "MB2Volume7"
+                        },
+                        "Device"   : "/dev/xvdl"
+                    }
+                ],
+                "KeyName"             : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"            : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r EX02 ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "MB1Volume1"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "10",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB1 OSTemp"
+                    }
+                ]
+            }
+        },
+        "MB1Volume2"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "50",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB1 Apps"
+                    }
+                ]
+            }
+        },
+        "MB1Volume3"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "937",
+                "Iops" : {
+                    "Ref" : "DBVolumePIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB1"
+                    }
+                ]
+            }
+        },
+        "MB1Volume4"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "937",
+                "Iops" : {
+                    "Ref" : "DBVolumePIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB2"
+                    }
+                ]
+            }
+        },
+        "MB1Volume5"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "937",
+                "Iops" : {
+                    "Ref" : "DBVolumePIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB3"
+                    }
+                ]
+            }
+        },
+        "MB1Volume6"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "937",
+                "Iops" : {
+                    "Ref" : "DBVolumePIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB4"
+                    }
+                ]
+            }
+        },
+        "MB1Volume7"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "853",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB1 MBRestore"
+                    }
+                ]
+            }
+        },
+        "MB2Volume1"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "10",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB2 OSTemp"
+                    }
+                ]
+            }
+        },
+        "MB2Volume2"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "50",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB2 Apps"
+                    }
+                ]
+            }
+        },
+        "MB2Volume3"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "937",
+                "Iops" : {
+                    "Ref" : "DBVolumePIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB1"
+                    }
+                ]
+            }
+        },
+        "MB2Volume4"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "937",
+                "Iops" : {
+                    "Ref" : "DBVolumePIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB2"
+                    }
+                ]
+            }
+        },
+        "MB2Volume5"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "937",
+                "Iops" : {
+                    "Ref" : "DBVolumePIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB3"
+                    }
+                ]
+            }
+        },
+        "MB2Volume6"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "937",
+                "Iops" : {
+                    "Ref" : "DBVolumePIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB4"
+                    }
+                ]
+            }
+        },
+        "MB2Volume7"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "853",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Volume Label",
+                        "Value" : "MB1 MBRestore"
+                    }
+                ]
+            }
+        },
+        "SGDAG"            : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "DAG Security Group",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                ]
+            }
+        },
+        "SGDAGIngress"     : {
+            "Type" : "AWS::EC2::SecurityGroupIngress",
+            "Properties" : {
+                "GroupId" : {
+                    "Ref" : "SGDAG"
+                },
+                "IpProtocol" : "-1",
+                "FromPort"   : "1",
+                "ToPort"     : "65535",
+                "SourceSecurityGroupId" : {
+                    "Ref" : "SGDAG"
+                }
+            }
+        },
+        "SGDAGIngressICMP" : {
+            "Type" : "AWS::EC2::SecurityGroupIngress",
+            "Properties" : {
+                "GroupId" : {
+                    "Ref" : "SGDAG"
+                },
+                "IpProtocol" : "icmp",
+                "FromPort"   : "-1",
+                "ToPort"     : "-1",
+                "SourceSecurityGroupId" : {
+                    "Ref" : "SGDAG"
+                }
+            }
+        },
+        "SMTPSecurityGroup" : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "Enable inbound SMTP traffic from the Internet",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "25",
+                        "ToPort"     : "25",
+                        "CidrIp"     : "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "465",
+                        "ToPort"     : "465",
+                        "CidrIp"     : "0.0.0.0/0"
+                    }
+                ]
+            }
+        },
+        "WebCasSecurityGroup" : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "Enable inbound Web based Outlook Client Access",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "80",
+                        "ToPort"     : "80",
+                        "CidrIp"     : "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "443",
+                        "ToPort"     : "443",
+                        "CidrIp"     : "0.0.0.0/0"
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs"                  : {
+        "DomainAdmin" : {
+            "Value" : {
+                "Fn::Join" : [
+                    "",
+                    [
+                        {
+                            "Ref" : "DomainNetBIOSName"
+                        },
+                        "\\",
+                        {
+                            "Ref" : "DomainAdminUser"
+                        }
+                    ]
+                ]
+            },
+            "Description" : "Domain administrator account"
+        },
+        "LocalAdmin"  : {
+            "Value" : "Administrator",
+            "Description" : "Please retrieve Administrator password of the instance"
+        },
+        "ExchangeServer1" : {
+            "Value" : {
+                "Ref" : "EX01NetBIOSName"
+            },
+            "Description" : "NetBIOS name of the 1st Mailbox Server"
+        },
+        "ExchangeServer2" : {
+            "Value" : {
+                "Ref" : "EX02NetBIOSName"
+            },
+            "Description" : "NetBIOS name of the 2nd Mailbox Server"
+        }
+    }
+}

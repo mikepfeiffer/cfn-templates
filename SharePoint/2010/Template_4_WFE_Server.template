@@ -1,0 +1,1434 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Description"              : "**Version 1.0** STEP-4 This template creates and installs an SharePoint Web Frontend Server WFE into a subnet inside a VPC. Default Domain Administrator password will be the one retrieved from the instance.  For adding members to the domain, ensure that they are launched in the domain member security group created by the Step-1 Infrastructure template and then configure them to use the AD instances private IP addresses as the DNS server. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
+    "Parameters"               : {
+        "KeyPairName" : {
+            "Description" : "Public/private key pairs allow you to securely connect to your instance after it launches",
+            "Type"        : "String"
+        },
+        "SPLicensekey" : {
+            "Description" : "A valid SharePoint PID in the format VK7BD-VBKWR-6FHD9-Q3HM9-6PKMX. You can download a SharePoint 2010 trial and trail PID from http://www.microsoft.com/en-us/download/details.aspx?id=16631",
+            "Type"        : "String"
+        },
+        "WebSVR1InstanceType" : {
+            "Description" : "Amazon EC2 instance type for the WFE Server Instance",
+            "Type"        : "String",
+            "Default"     : "m1.xlarge",
+            "AllowedValues" : [
+                "m1.small",
+                "m1.medium",
+                "m1.large",
+                "m1.xlarge",
+                "m2.xlarge",
+                "m2.2xlarge",
+                "m2.4xlarge",
+                "c1.medium",
+                "c1.xlarge"
+            ]
+        },
+        "DomainDNSName"       : {
+            "Description" : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.com",
+            "Type"        : "String",
+            "Default"     : "contoso.com",
+            "MinLength"   : "3",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "DomainNetBIOSName"   : {
+            "Description" : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. CORP",
+            "Type"        : "String",
+            "Default"     : "contoso",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "Server1NetBIOSName"  : {
+            "Description" : "NetBIOS name of the 1st WFE Server (upto 15 characters)",
+            "Type"        : "String",
+            "Default"     : "WFE1",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "Server2NetBIOSName"  : {
+            "Description" : "NetBIOS name of the 2nd WFE Server (upto 15 characters)",
+            "Type"        : "String",
+            "Default"     : "WFE2",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "DomainAdminUser"     : {
+            "Description" : "User name for the account that will be added as Domain Administrator. This is separate from the default \"Administrator\" account",
+            "Type"        : "String",
+            "Default"     : "StackAdmin",
+            "MinLength"   : "5",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]*"
+        },
+        "DomainAdminPassword" : {
+            "Description" : "Password for the domain admin user. Must be at least 8 characters containing letters, numbers and symbols",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "true",
+            "Default"        : "Password123"
+        },
+        "SPSAdminUser"        : {
+            "Description" : "User name for the SharePoint Server Admin Account. This Account is a Domain User and will also be added to the SQL DB as a member of the dbcreator role.",
+            "Type"        : "String",
+            "Default"     : "SPFarmAdmin",
+            "MinLength"   : "5",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]*"
+        },
+        "SPSAdminPassword"    : {
+            "Description" : "Password for the SPS admin user. Must be at least 8 characters containing letters, numbers and symbols",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "true",
+            "Default"        : "Password123"
+        },
+        "AZ"                  : {
+            "Description" : "Name of Availabilty Zone that contains public & private subnets and that you will launch your instance into - Select valid Zone for region ",
+            "Type"        : "String",
+            "Default"     : "us-east-1a",
+            "AllowedValues" : [
+                "eu-west-1a",
+                "eu-west-1b",
+                "eu-west-1c",
+                "us-east-1a",
+                "us-east-1b",
+                "us-east-1c",
+                "us-east-1d",
+                "us-west-1a",
+                "us-west-1b",
+                "ap-southeast-1a",
+                "ap-southeast-1b",
+                "ap-northeast-1a",
+                "ap-northeast-1b",
+                "ap-northeast-1c",
+                "us-west-2a",
+                "us-west-2b",
+                "us-west-2c",
+                "sa-east-1a",
+                "sa-east-1b"
+            ],
+            "ConstraintDescription" : "Must be a valid EC2 Availabilty zone for region being deployed to. Only supports eu-west-1 ,us-east-1 & us-west-1 etc <- You can customize if you define a constraint"
+        },
+        "AZ2"                 : {
+            "Description" : "Name of Availabilty Zone that contains public & private subnets and that you will launch your instance into - Select valid Zone for region ",
+            "Type"        : "String",
+            "Default"     : "us-east-1b",
+            "AllowedValues" : [
+                "eu-west-1a",
+                "eu-west-1b",
+                "eu-west-1c",
+                "us-east-1a",
+                "us-east-1b",
+                "us-east-1c",
+                "us-east-1d",
+                "us-west-1a",
+                "us-west-1b",
+                "ap-southeast-1a",
+                "ap-southeast-1b",
+                "ap-northeast-1a",
+                "ap-northeast-1b",
+                "ap-northeast-1c",
+                "us-west-2a",
+                "us-west-2b",
+                "us-west-2c",
+                "sa-east-1a",
+                "sa-east-1b"
+            ],
+            "ConstraintDescription" : "Must be a valid EC2 Availabilty zone for region being deployed to. Only supports eu-west-1 ,us-east-1 & us-west-1 etc <- You can customize if you define a constraint"
+        },
+        "AD1PrivateIp"        : {
+            "Description" : "Fixed private IP for the first Active Directory server located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.1.10"
+        },
+        "AD2PrivateIp"        : {
+            "Description" : "Fixed private IP for the second Active Directory server located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.5.10"
+        },
+        "DomainMemberSGID"    : {
+            "Description" : "ID of the Domain Member Security Group",
+            "Type"        : "String"
+        },
+        "WfeServerSecurityGroupID" : {
+            "Description" : "ID of the Web Front End Server Security Group",
+            "Type"        : "String"
+        },
+        "LBSecurityGroupID"        : {
+            "Description" : "ID of the Load Balancer Security Group",
+            "Type"        : "String"
+        },
+        "VPC"                      : {
+            "Description" : "ID of the VPC",
+            "Type"        : "String"
+        },
+        "WFESvrSubnet"             : {
+            "Description" : "ID of the WFE1 Server Subnet",
+            "Type"        : "String"
+        },
+        "WFE2SvrSubnet"            : {
+            "Description" : "ID of the WFE2 Server Subnet",
+            "Type"        : "String"
+        },
+        "DMZ1Subnet"               : {
+            "Description" : "ID of the DMZ1 Subnet",
+            "Type"        : "String"
+        },
+        "DMZ2Subnet"               : {
+            "Description" : "ID of the DMZ2 Subnet",
+            "Type"        : "String"
+        },
+        "SPSAMIID"                 : {
+            "Description" : "ID of the 64-bit CloudFormation enabled SharePoint Server AMI available for launch in your region",
+            "Type"        : "String"
+        }
+    },
+    "Resources"                : {
+        "IAMUser" : {
+            "Type" : "AWS::IAM::User",
+            "Properties" : {
+                "Path" : "/",
+                "Policies" : [
+                    {
+                        "PolicyName" : "root",
+                        "PolicyDocument" : {
+                            "Statement" : [
+                                {
+                                    "Effect" : "Allow",
+                                    "Action" : "CloudFormation:DescribeStackResource",
+                                    "Resource" : "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "IAMUserAccessKey" : {
+            "Type" : "AWS::IAM::AccessKey",
+            "Properties" : {
+                "UserName" : {
+                    "Ref" : "IAMUser"
+                }
+            }
+        },
+        "WebSVR1"          : {
+            "Type" : "AWS::EC2::Instance",
+            "Metadata" : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "setup",
+                            "rename",
+                            "createraid",
+                            "join",
+                            "install",
+                            "finalize"
+                        ]
+                    },
+                    "setup"      : {
+                        "files" : {
+                            "c:\\cfn\\cfn-credentials" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "AWSAccessKeyId=",
+                                            {
+                                                "Ref" : "IAMUserAccessKey"
+                                            },
+                                            "\n",
+                                            "AWSSecretKey=",
+                                            {
+                                                "Fn::GetAtt" : [
+                                                    "IAMUserAccessKey",
+                                                    "SecretAccessKey"
+                                                ]
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\cfn-hup.conf"    : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackName"
+                                            },
+                                            "\n",
+                                            "credential-file=c:\\cfn\\cfn-credentials\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.WebSVR1.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackName"
+                                            },
+                                            " -r WebSVR1 ",
+                                            " --credential-file c:\\cfn\\cfn-credentials",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\RunCommand.bat"                 : {
+                                "content" : "%~1\nIF %ERRORLEVEL% GTR 10 ( exit /b 1 ) else ( exit /b 0 )"
+                            },
+                            "c:\\cfn\\scripts\\SetDNSOnNIC.ps1"        : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param($Gateway1,$Gateway2)",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"}",
+                                            "\n",
+                                            "Foreach($NIC in $NICs) {$DNSServers = \"$Gateway1\",\"$Gateway2\"",
+                                            "\n",
+                                            "$NIC.SetDNSServerSearchOrder($DNSServers)",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration(\"TRUE\")}",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\RenameComputer.ps1"     : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ($name)",
+                                            "\n",
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename($name)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\PSISE.ps1"              : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature powershell-ise",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\AddIIS.ps1"             : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature web-server",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DownloadSPInst.ps1"     : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/SPInstWFE.ps1 -Destination C:\\cfn\\scripts\\SPInstWFE.ps1",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/JoinFarm.ps1 -Destination C:\\cfn\\scripts\\JoinFarm.ps1",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/CreateAppAndSite.PS1 -Destination C:\\cfn\\scripts\\CreateAppAndSite.PS1",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DownloadOpenWebServerPorts.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/OpenWebServerPorts.bat -Destination C:\\cfn\\scripts\\OpenWebServerPorts.bat",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk.txt"                 : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "select disk=1 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=1 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume stripe disk=1,2 ",
+                                            "\n",
+                                            "select volume=1 ",
+                                            "\n",
+                                            "assign letter=D ",
+                                            "\n",
+                                            "format fs=ntfs quick ",
+                                            "\n",
+                                            "exit",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk.bat"                 : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "diskpart /s C:\\cfn\\scripts\\StripeDisk.txt",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1 ",
+                                            {
+                                                "Ref" : "Server1NetBIOSName"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-reboot"                                   : {
+                                "command" : "shutdown -r -t 1"
+                            }
+                        }
+                    },
+                    "createraid" : {
+                        "commands" : {
+                            "1-perform-StripeDisk" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\scripts\\StripeDisk.bat"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "commands" : {
+                            "1-set-dns-on-nic" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
+                                            {
+                                                "Ref" : "AD1PrivateIp"
+                                            },
+                                            " ",
+                                            {
+                                                "Ref" : "AD2PrivateIp"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-join-domain"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "NETDOM join localhost /Domain:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /userd:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /passwordd:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " /reboot"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "3-add-local-admin" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-add-farm-admin"  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "SPSAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "install"    : {
+                        "commands" : {
+                            "1-execute-powershell-script-PSISE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\PSISE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-install-prereq"                  : {
+                                "command" : "C:\\SharePoint_Install\\PrerequisiteInstaller.exe /unattended"
+                            },
+                            "3-execute-powershell-script-AddIIS" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\AddIIS.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-execute-powershell-script-DownloadSPInst" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadSPInst.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "5-execute-powershell-script-SPInstWFE"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Bypass",
+                                            " C:\\cfn\\scripts\\SPInstWFE.ps1 -productkey \"",
+                                            {
+                                                "Ref" : "SPLicensekey"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "6-execute-powershell-script-DownloadOpenWebServerPorts" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadOpenWebServerPorts.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "7-open-Web-ports"                                       : {
+                                "command" : "C:\\cfn\\scripts\\OpenWebServerPorts.bat"
+                            }
+                        }
+                    },
+                    "finalize"   : {
+                        "commands" : {
+                            "1-signal-success" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e 0 \"",
+                                            {
+                                                "Ref" : "WebSVR1WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Ref" : "SPSAMIID"
+                },
+                "InstanceType" : {
+                    "Ref" : "WebSVR1InstanceType"
+                },
+                "SubnetId"     : {
+                    "Ref" : "WFESvrSubnet"
+                },
+                "Tags"         : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "Server1NetBIOSName"
+                        }
+                    }
+                ],
+                "Volumes"      : [
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WFEStripeVolume1"
+                        },
+                        "Device"   : "/dev/xvdf"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WFEStripeVolume2"
+                        },
+                        "Device"   : "/dev/xvdg"
+                    }
+                ],
+                "SecurityGroupIds" : [
+                    {
+                        "Ref" : "DomainMemberSGID"
+                    },
+                    {
+                        "Ref" : "WfeServerSecurityGroupID"
+                    }
+                ],
+                "KeyName"          : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"         : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackName"
+                                },
+                                " -r WebSVR1 ",
+                                " --access-key ",
+                                {
+                                    "Ref" : "IAMUserAccessKey"
+                                },
+                                " --secret-key ",
+                                {
+                                    "Fn::GetAtt" : [
+                                        "IAMUserAccessKey",
+                                        "SecretAccessKey"
+                                    ]
+                                },
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "SCHTASKS /Create /SC MINUTE /MO 10 /TN cfn-hup /RU SYSTEM /TR \"cfn-hup.exe -v --no-daemon\"",
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "WebSVR2"          : {
+            "Type" : "AWS::EC2::Instance",
+            "Metadata" : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "setup",
+                            "rename",
+                            "createraid",
+                            "join",
+                            "install",
+                            "finalize"
+                        ]
+                    },
+                    "setup"      : {
+                        "files" : {
+                            "c:\\cfn\\cfn-credentials" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "AWSAccessKeyId=",
+                                            {
+                                                "Ref" : "IAMUserAccessKey"
+                                            },
+                                            "\n",
+                                            "AWSSecretKey=",
+                                            {
+                                                "Fn::GetAtt" : [
+                                                    "IAMUserAccessKey",
+                                                    "SecretAccessKey"
+                                                ]
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\cfn-hup.conf"    : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackName"
+                                            },
+                                            "\n",
+                                            "credential-file=c:\\cfn\\cfn-credentials\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.WebSVR2.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackName"
+                                            },
+                                            " -r WebSVR2 ",
+                                            " --credential-file c:\\cfn\\cfn-credentials",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\RunCommand.bat"                 : {
+                                "content" : "%~1\nIF %ERRORLEVEL% GTR 10 ( exit /b 1 ) else ( exit /b 0 )"
+                            },
+                            "c:\\cfn\\scripts\\SetDNSOnNIC.ps1"        : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param($Gateway1,$Gateway2)",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"}",
+                                            "\n",
+                                            "Foreach($NIC in $NICs) {$DNSServers = \"$Gateway1\",\"$Gateway2\"",
+                                            "\n",
+                                            "$NIC.SetDNSServerSearchOrder($DNSServers)",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration(\"TRUE\")}",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\RenameComputer.ps1"     : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ($name)",
+                                            "\n",
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename($name)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\PSISE.ps1"              : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature powershell-ise",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\AddIIS.ps1"             : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature web-server",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DownloadSPInst.ps1"     : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/SPInstWFE.ps1 -Destination C:\\cfn\\scripts\\SPInstWFE.ps1",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/JoinFarm.ps1 -Destination C:\\cfn\\scripts\\JoinFarm.ps1",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/CreateAppAndSite.PS1 -Destination C:\\cfn\\scripts\\CreateAppAndSite.PS1",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DownloadOpenWebServerPorts.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/OpenWebServerPorts.bat -Destination C:\\cfn\\scripts\\OpenWebServerPorts.bat",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk.txt"                 : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "select disk=1 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=1 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume stripe disk=1,2 ",
+                                            "\n",
+                                            "select volume=1 ",
+                                            "\n",
+                                            "assign letter=D ",
+                                            "\n",
+                                            "format fs=ntfs quick ",
+                                            "\n",
+                                            "exit",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk.bat"                 : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "diskpart /s C:\\cfn\\scripts\\StripeDisk.txt",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1 ",
+                                            {
+                                                "Ref" : "Server2NetBIOSName"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-reboot"                                   : {
+                                "command" : "shutdown -r -t 1"
+                            }
+                        }
+                    },
+                    "createraid" : {
+                        "commands" : {
+                            "1-perform-StripeDisk" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\scripts\\StripeDisk.bat"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "commands" : {
+                            "1-set-dns-on-nic" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
+                                            {
+                                                "Ref" : "AD1PrivateIp"
+                                            },
+                                            " ",
+                                            {
+                                                "Ref" : "AD2PrivateIp"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-join-domain"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "NETDOM join localhost /Domain:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /userd:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /passwordd:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " /reboot"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "3-add-local-admin" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-add-farm-admin"  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "SPSAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "install"    : {
+                        "commands" : {
+                            "1-execute-powershell-script-PSISE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\PSISE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-install-prereq"                  : {
+                                "command" : "C:\\SharePoint_Install\\PrerequisiteInstaller.exe /unattended"
+                            },
+                            "3-execute-powershell-script-AddIIS" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\AddIIS.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-execute-powershell-script-DownloadSPInst" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadSPInst.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "5-execute-powershell-script-SPInstWFE"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Bypass",
+                                            " C:\\cfn\\scripts\\SPInstWFE.ps1 -productkey \"",
+                                            {
+                                                "Ref" : "SPLicensekey"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "6-execute-powershell-script-DownloadOpenWebServerPorts" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadOpenWebServerPorts.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "7-open-Web-ports"                                       : {
+                                "command" : "C:\\cfn\\scripts\\OpenWebServerPorts.bat"
+                            }
+                        }
+                    },
+                    "finalize"   : {
+                        "commands" : {
+                            "1-signal-success" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e 0 \"",
+                                            {
+                                                "Ref" : "WebSVR2WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Ref" : "SPSAMIID"
+                },
+                "InstanceType" : {
+                    "Ref" : "WebSVR1InstanceType"
+                },
+                "SubnetId"     : {
+                    "Ref" : "WFE2SvrSubnet"
+                },
+                "Tags"         : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "Server2NetBIOSName"
+                        }
+                    }
+                ],
+                "Volumes"      : [
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WFE2StripeVolume1"
+                        },
+                        "Device"   : "/dev/xvdf"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WFE2StripeVolume2"
+                        },
+                        "Device"   : "/dev/xvdg"
+                    }
+                ],
+                "SecurityGroupIds" : [
+                    {
+                        "Ref" : "DomainMemberSGID"
+                    },
+                    {
+                        "Ref" : "WfeServerSecurityGroupID"
+                    }
+                ],
+                "KeyName"          : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"         : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackName"
+                                },
+                                " -r WebSVR2 ",
+                                " --access-key ",
+                                {
+                                    "Ref" : "IAMUserAccessKey"
+                                },
+                                " --secret-key ",
+                                {
+                                    "Fn::GetAtt" : [
+                                        "IAMUserAccessKey",
+                                        "SecretAccessKey"
+                                    ]
+                                },
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "SCHTASKS /Create /SC MINUTE /MO 10 /TN cfn-hup /RU SYSTEM /TR \"cfn-hup.exe -v --no-daemon\"",
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "ElasticLoadBalancer" : {
+            "Type" : "AWS::ElasticLoadBalancing::LoadBalancer",
+            "Properties" : {
+                "Subnets" : [
+                    {
+                        "Ref" : "DMZ1Subnet"
+                    },
+                    {
+                        "Ref" : "DMZ2Subnet"
+                    }
+                ],
+                "Instances" : [
+                    {
+                        "Ref" : "WebSVR1"
+                    },
+                    {
+                        "Ref" : "WebSVR2"
+                    }
+                ],
+                "Listeners" : [
+                    {
+                        "LoadBalancerPort" : "80",
+                        "InstancePort"     : "80",
+                        "Protocol"         : "HTTP"
+                    }
+                ],
+                "SecurityGroups" : [
+                    {
+                        "Ref" : "LBSecurityGroupID"
+                    }
+                ],
+                "HealthCheck"    : {
+                    "Target" : "TCP:80",
+                    "HealthyThreshold" : "3",
+                    "UnhealthyThreshold" : "5",
+                    "Interval"           : "10",
+                    "Timeout"            : "5"
+                }
+            }
+        },
+        "WebSVR1WaitCondition" : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "WebSVR1",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "WebSVR1WaitHandle"
+                },
+                "Timeout" : "3000"
+            }
+        },
+        "WebSVR1WaitHandle"    : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "WebSVR2WaitCondition" : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "WebSVR2",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "WebSVR2WaitHandle"
+                },
+                "Timeout" : "3000"
+            }
+        },
+        "WebSVR2WaitHandle"    : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "WFEStripeVolume1"     : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "100",
+                "AvailabilityZone" : {
+                    "Ref" : "AZ"
+                }
+            }
+        },
+        "WFEStripeVolume2"     : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "100",
+                "AvailabilityZone" : {
+                    "Ref" : "AZ"
+                }
+            }
+        },
+        "WFE2StripeVolume1"    : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "100",
+                "AvailabilityZone" : {
+                    "Ref" : "AZ2"
+                }
+            }
+        },
+        "WFE2StripeVolume2"    : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "100",
+                "AvailabilityZone" : {
+                    "Ref" : "AZ2"
+                }
+            }
+        }
+    },
+    "Outputs"                  : {
+        "DomainAdmin" : {
+            "Value" : {
+                "Fn::Join" : [
+                    "",
+                    [
+                        {
+                            "Ref" : "DomainNetBIOSName"
+                        },
+                        "\\Administrator"
+                    ]
+                ]
+            },
+            "Description" : "Default domain administrator account"
+        },
+        "Server1NetBIOSName" : {
+            "Value" : {
+                "Ref" : "Server1NetBIOSName"
+            },
+            "Description" : "NetBios name of the WFE1 server"
+        },
+        "Server2NetBIOSName" : {
+            "Value" : {
+                "Ref" : "Server2NetBIOSName"
+            },
+            "Description" : "NetBios name of the WFE2 server"
+        },
+        "ElasticLoadBalancer" : {
+            "Value" : {
+                "Ref" : "ElasticLoadBalancer"
+            },
+            "Description" : "Address of the Elastic Load Balancer. After configuring your SharePoint Farm connect to your site using this address"
+        }
+    }
+}

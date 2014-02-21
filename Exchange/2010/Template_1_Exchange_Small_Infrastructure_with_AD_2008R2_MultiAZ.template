@@ -1,0 +1,3997 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Description"              : "**Version 1.0** ***Exchange2010-Infrastructure-and-AD*** STEP-1 This template creates a VPC infrastructure for a multi-AZ, multi-tier deployment of a Windows based Application infrstructure. It installs 2 Active Directory Domain Controllers into subnets in seperate AZs inside a VPC, as well as Remote Desktop Gateway and NAT instances into the DMZ for each Availability Zone. The default Domain Administrator password will be the one retrieved from the instance.  For adding members to the domain, ensure that they are launched into the domain member security group created by this template and then configure them to use the AD instances fixed private IP addresses as the DNS server. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
+    "Parameters"               : {
+        "KeyPairName" : {
+            "Description" : "Public/private key pairs allow you to securely connect to your instance after it launches",
+            "Type"        : "String"
+        },
+        "ADServer1NetBIOSName" : {
+            "Description" : "NetBIOS name of the 1st AD Server (upto 15 characters)",
+            "Type"        : "String",
+            "Default"     : "DC1",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "ADServer2NetBIOSName" : {
+            "Description" : "NetBIOS name of the 2nd AD Server (upto 15 characters)",
+            "Type"        : "String",
+            "Default"     : "DC2",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "DomainDNSName"        : {
+            "Description" : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.com",
+            "Type"        : "String",
+            "MinLength"   : "3",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "DomainNetBIOSName"    : {
+            "Description" : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. example",
+            "Type"        : "String",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "RestoreModePassword"  : {
+            "Description" : "Password for a separate Administrator account when the domain controller is in Restore Mode. Must be at least 8 characters containing letters, numbers and symbols",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "True",
+            "Default"        : "Password123"
+        },
+        "DomainAdminUser"      : {
+            "Description" : "User name for the account that will be added as Domain Administrator. This is separate from the default \"Administrator\" account",
+            "Type"        : "String",
+            "Default"     : "StackAdmin",
+            "MinLength"   : "5",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]*"
+        },
+        "DomainAdminPassword"  : {
+            "Description" : "Password for the domain admin user. Must be at least 8 characters containing letters and numbers",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "true",
+            "Default"        : "Password123"
+        },
+        "ExchangeAdminUser"    : {
+            "Description" : "User name for the Exchange Server Admin Account. This Account is a member of the Domain, Enterprise and Schema Admins Groups.",
+            "Type"        : "String",
+            "Default"     : "exadmin",
+            "MinLength"   : "5",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]*"
+        },
+        "ExchangeAdminPassword" : {
+            "Description" : "Password for the Exchange admin user. Must be at least 8 characters containing letters, numbers and symbols",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "true",
+            "Default"        : "Password123"
+        }
+    },
+    "Mappings"                 : {
+        "AWSInstanceType2Arch" : {
+            "m1.small" : {
+                "Arch" : "64"
+            },
+            "m1.medium" : {
+                "Arch" : "64"
+            },
+            "m1.large"  : {
+                "Arch" : "64"
+            },
+            "m1.xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.2xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.4xlarge" : {
+                "Arch" : "64"
+            },
+            "c1.medium"  : {
+                "Arch" : "64"
+            },
+            "c1.xlarge"  : {
+                "Arch" : "64"
+            }
+        },
+        "AWSRegionArch2AMI"    : {
+            "us-east-1" : {
+                "64" : "ami-7f236a16"
+            },
+            "eu-west-1" : {
+                "64" : "ami-423dd835"
+            },
+            "ap-northeast-1" : {
+                "64" : "ami-69dd4168"
+            },
+            "us-west-1"      : {
+                "64" : "ami-d0261395"
+            },
+            "us-west-2"      : {
+                "64" : "ami-54de4164"
+            },
+            "ap-southeast-1" : {
+                "64" : "ami-048dc656"
+            },
+            "ap-southeast-2" : {
+                "64" : "ami-f59e03cf"
+            },
+            "sa-east-1"      : {
+                "64" : "ami-57d4734a"
+            }
+        },
+        "AWSRegionArchNatAMI"  : {
+            "us-east-1" : {
+                "64" : "ami-f619c29f"
+            },
+            "us-west-2" : {
+                "64" : "ami-52ff7262"
+            },
+            "us-west-1" : {
+                "64" : "ami-3bcc9e7e"
+            },
+            "eu-west-1" : {
+                "64" : "ami-e5e2d991"
+            },
+            "ap-southeast-1" : {
+                "64" : "ami-02eb9350"
+            },
+            "ap-northeast-1" : {
+                "64" : "ami-14d86d15"
+            },
+            "sa-east-1"      : {
+                "64" : "ami-0039e61d"
+            },
+            "ap-southeast-2" : {
+                "64" : "ami-ab990e91"
+            }
+        },
+        "SubnetConfig"         : {
+            "VPC" : {
+                "CIDR" : "10.0.0.0/16"
+            },
+            "DC1" : {
+                "CIDR" : "10.0.1.0/24"
+            },
+            "Repl1" : {
+                "CIDR" : "10.0.2.0/24"
+            },
+            "Mapi1" : {
+                "CIDR" : "10.0.3.0/24"
+            },
+            "Client1" : {
+                "CIDR" : "10.0.4.0/24"
+            },
+            "DC2"     : {
+                "CIDR" : "10.0.5.0/24"
+            },
+            "Repl2"   : {
+                "CIDR" : "10.0.6.0/24"
+            },
+            "Mapi2"   : {
+                "CIDR" : "10.0.7.0/24"
+            },
+            "Client2" : {
+                "CIDR" : "10.0.8.0/24"
+            },
+            "Public1" : {
+                "CIDR" : "10.0.9.0/24"
+            },
+            "Public2" : {
+                "CIDR" : "10.0.10.0/24"
+            }
+        },
+        "InstanceTypes"        : {
+            "NATInstance" : {
+                "Type" : "m1.small"
+            },
+            "RDGWInstance" : {
+                "Type" : "m1.medium"
+            },
+            "ADServerInstance" : {
+                "Type" : "m1.xlarge"
+            }
+        },
+        "ADPrivateIPs"         : {
+            "DC1" : {
+                "IP" : "10.0.1.10"
+            },
+            "DC2" : {
+                "IP" : "10.0.5.10"
+            }
+        }
+    },
+    "Resources"                : {
+        "DhcpOptions" : {
+            "Type" : "AWS::EC2::DHCPOptions",
+            "Properties" : {
+                "DomainName" : {
+                    "Ref" : "DomainDNSName"
+                },
+                "DomainNameServers" : [
+                    "AmazonProvidedDNS"
+                ],
+                "NtpServers"        : [
+                    {
+                        "Fn::FindInMap" : [
+                            "ADPrivateIPs",
+                            "DC1",
+                            "IP"
+                        ]
+                    }
+                ],
+                "NetbiosNameServers" : [
+                    {
+                        "Fn::FindInMap" : [
+                            "ADPrivateIPs",
+                            "DC1",
+                            "IP"
+                        ]
+                    },
+                    {
+                        "Fn::FindInMap" : [
+                            "ADPrivateIPs",
+                            "DC2",
+                            "IP"
+                        ]
+                    }
+                ],
+                "NetbiosNodeType"    : "2",
+                "Tags"               : [
+                    {
+                        "Key" : "Domain",
+                        "Value" : {
+                            "Ref" : "DomainDNSName"
+                        }
+                    }
+                ]
+            }
+        },
+        "VPC"         : {
+            "Type" : "AWS::EC2::VPC",
+            "Properties" : {
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "VPC",
+                        "CIDR"
+                    ]
+                },
+                "Tags"      : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Public"
+                    }
+                ]
+            }
+        },
+        "VPCDHCPOptionsAssociation" : {
+            "Type" : "AWS::EC2::VPCDHCPOptionsAssociation",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "DhcpOptionsId" : {
+                    "Ref" : "DhcpOptions"
+                }
+            }
+        },
+        "PublicSubnet1"             : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "Public1",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Public"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "Public Subnet 1"
+                    }
+                ]
+            }
+        },
+        "PublicSubnet2"             : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "Public2",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Public"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "Public Subnet 2"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet1"            : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "DC1",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Private"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "DC1 Subnet"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet2"            : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "Repl1",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Private"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "Replication Subnet 1"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet3"            : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "Mapi1",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Private"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "Mapi Subnet 1"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet4"            : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "Client1",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Private"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "Client Subnet 1"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet5"            : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "DC2",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Private"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "DC2 Subnet"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet6"            : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "Repl2",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Private"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "Replication Subnet 2"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet7"            : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "Mapi2",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Private"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "Mapi Subnet 2"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet8"            : {
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "CidrBlock" : {
+                    "Fn::FindInMap" : [
+                        "SubnetConfig",
+                        "Client2",
+                        "CIDR"
+                    ]
+                },
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Private"
+                    },
+                    {
+                        "Key" : "Role",
+                        "Value" : "Client Subnet 2"
+                    }
+                ]
+            }
+        },
+        "InternetGateway"           : {
+            "Type" : "AWS::EC2::InternetGateway",
+            "Properties" : {
+                "Tags" : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "Public"
+                    }
+                ]
+            }
+        },
+        "AttachGateway"             : {
+            "Type" : "AWS::EC2::VPCGatewayAttachment",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "InternetGatewayId" : {
+                    "Ref" : "InternetGateway"
+                }
+            }
+        },
+        "PublicRouteTable"          : {
+            "Type" : "AWS::EC2::RouteTable",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "Tags"  : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "DMZ"
+                    }
+                ]
+            }
+        },
+        "PublicRoute"               : {
+            "Type" : "AWS::EC2::Route",
+            "Properties" : {
+                "RouteTableId" : {
+                    "Ref" : "PublicRouteTable"
+                },
+                "DestinationCidrBlock" : "0.0.0.0/0",
+                "GatewayId"            : {
+                    "Ref" : "InternetGateway"
+                }
+            }
+        },
+        "PublicSubnet1RouteTableAssociation" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PublicSubnet1"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PublicRouteTable"
+                }
+            }
+        },
+        "PublicSubnet2RouteTableAssociation" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PublicSubnet2"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PublicRouteTable"
+                }
+            }
+        },
+        "MAPINetwork1RouteTableAssociation"  : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet3"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PublicRouteTable"
+                }
+            }
+        },
+        "MAPINetwork2RouteTableAssociation"  : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet7"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PublicRouteTable"
+                }
+            }
+        },
+        "PrivateRouteTable1"                 : {
+            "Type" : "AWS::EC2::RouteTable",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "Tags"  : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "AZ1 Private"
+                    }
+                ]
+            }
+        },
+        "PrivateRoute1"                      : {
+            "Type" : "AWS::EC2::Route",
+            "Properties" : {
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable1"
+                },
+                "DestinationCidrBlock" : "0.0.0.0/0",
+                "InstanceId"           : {
+                    "Ref" : "NAT1"
+                }
+            }
+        },
+        "PrivateSubnetRouteTableAssociation1" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet1"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable1"
+                }
+            }
+        },
+        "PrivateSubnetRouteTableAssociation2" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet2"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable1"
+                }
+            }
+        },
+        "PrivateSubnetRouteTableAssociation4" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet4"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable1"
+                }
+            }
+        },
+        "PrivateRouteTable2"                  : {
+            "Type" : "AWS::EC2::RouteTable",
+            "Properties" : {
+                "VpcId" : {
+                    "Ref" : "VPC"
+                },
+                "Tags"  : [
+                    {
+                        "Key" : "Application",
+                        "Value" : {
+                            "Ref" : "AWS::StackName"
+                        }
+                    },
+                    {
+                        "Key" : "Network",
+                        "Value" : "AZ2 Private"
+                    }
+                ]
+            }
+        },
+        "PrivateRoute2"                       : {
+            "Type" : "AWS::EC2::Route",
+            "Properties" : {
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable2"
+                },
+                "DestinationCidrBlock" : "0.0.0.0/0",
+                "InstanceId"           : {
+                    "Ref" : "NAT2"
+                }
+            }
+        },
+        "PrivateSubnetRouteTableAssociation5" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet5"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable2"
+                }
+            }
+        },
+        "PrivateSubnetRouteTableAssociation6" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet6"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable2"
+                }
+            }
+        },
+        "PrivateSubnetRouteTableAssociation8" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet8"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable2"
+                }
+            }
+        },
+        "Rdgw1EIP"                            : {
+            "Type" : "AWS::EC2::EIP",
+            "Properties" : {
+                "Domain" : "vpc",
+                "InstanceId" : {
+                    "Ref" : "RDGateway1"
+                }
+            }
+        },
+        "Rdgw2EIP"                            : {
+            "Type" : "AWS::EC2::EIP",
+            "Properties" : {
+                "Domain" : "vpc",
+                "InstanceId" : {
+                    "Ref" : "RDGateway2"
+                }
+            }
+        },
+        "NAT1EIP"                             : {
+            "Type" : "AWS::EC2::EIP",
+            "Properties" : {
+                "Domain" : "vpc",
+                "InstanceId" : {
+                    "Ref" : "NAT1"
+                }
+            }
+        },
+        "NAT2EIP"                             : {
+            "Type" : "AWS::EC2::EIP",
+            "Properties" : {
+                "Domain" : "vpc",
+                "InstanceId" : {
+                    "Ref" : "NAT2"
+                }
+            }
+        },
+        "NAT1"                                : {
+            "Type" : "AWS::EC2::Instance",
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArchNatAMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Fn::FindInMap" : [
+                                        "InstanceTypes",
+                                        "NATInstance",
+                                        "Type"
+                                    ]
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Fn::FindInMap" : [
+                        "InstanceTypes",
+                        "NATInstance",
+                        "Type"
+                    ]
+                },
+                "SubnetId"     : {
+                    "Ref" : "PublicSubnet1"
+                },
+                "Tags"         : [
+                    {
+                        "Key" : "Name",
+                        "Value" : "NAT1"
+                    }
+                ],
+                "SecurityGroupIds" : [
+                    {
+                        "Ref" : "NAT1SecurityGroup"
+                    }
+                ],
+                "KeyName"          : {
+                    "Ref" : "KeyPairName"
+                },
+                "SourceDestCheck"  : "false"
+            }
+        },
+        "NAT2"                                : {
+            "Type" : "AWS::EC2::Instance",
+            "DependsOn" : "NAT1",
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArchNatAMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Fn::FindInMap" : [
+                                        "InstanceTypes",
+                                        "NATInstance",
+                                        "Type"
+                                    ]
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Fn::FindInMap" : [
+                        "InstanceTypes",
+                        "NATInstance",
+                        "Type"
+                    ]
+                },
+                "SubnetId"     : {
+                    "Ref" : "PublicSubnet2"
+                },
+                "Tags"         : [
+                    {
+                        "Key" : "Name",
+                        "Value" : "NAT2"
+                    }
+                ],
+                "SecurityGroupIds" : [
+                    {
+                        "Ref" : "NAT2SecurityGroup"
+                    }
+                ],
+                "KeyName"          : {
+                    "Ref" : "KeyPairName"
+                },
+                "SourceDestCheck"  : "false"
+            }
+        },
+        "DomainController"                    : {
+            "Type" : "AWS::EC2::Instance",
+            "DependsOn" : "NAT2",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "rename",
+                            "dcpromo",
+                            "createsite",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.DomainController.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r DomainController",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\RenameComputer.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ($name)",
+                                            "\n",
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename($name)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1 ",
+                                            {
+                                                "Ref" : "ADServer1NetBIOSName"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-reboot"                                   : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "shutdown -r -t 1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "dcpromo"    : {
+                        "files" : {
+                            "C:\\cfn\\RunCommand.bat" : {
+                                "content" : "%~1\nIF %ERRORLEVEL% GTR 10 ( exit /b 1 ) else ( exit /b 0 )"
+                            },
+                            "C:\\cfn\\scripts\\CreateUser.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ",
+                                            "\n",
+                                            "(",
+                                            "\n",
+                                            "[string] $UserName,",
+                                            "\n",
+                                            "[string] $AccountPassword,",
+                                            "\n",
+                                            "[string] $DomainDNSName",
+                                            "\n",
+                                            ")",
+                                            "\n",
+                                            "$account_pwd = convertto-securestring $AccountPassword -asplaintext -force ",
+                                            "\n",
+                                            "$DomainFQDN = $DomainDNSName.Split(\".\")",
+                                            "\n",
+                                            "$PathObject = $(\"CN=Users\")",
+                                            "\n",
+                                            "foreach ($DomainFQDNObject in $DomainFQDN)",
+                                            "\n",
+                                            "{",
+                                            "$PathObject = $($PathObject + \",\")",
+                                            "\n",
+                                            "$PathObject = $($Pathobject + \"DC=\" + $DomainFQDNObject)",
+                                            "\n",
+                                            "}",
+                                            "New-ADUser `",
+                                            "\n",
+                                            "-Name $UserName `",
+                                            "\n",
+                                            "-SamAccountName $UserName `",
+                                            "\n",
+                                            "-Path $PathObject `",
+                                            "\n",
+                                            "-AccountPassword $account_pwd `",
+                                            "\n",
+                                            "-PasswordNeverExpires $true `",
+                                            "\n",
+                                            "-Enabled $true"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\JoinGroup.ps1"  : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ",
+                                            "\n",
+                                            "(",
+                                            "\n",
+                                            "[string] $UserName,",
+                                            "\n",
+                                            "[string] $ServerName,",
+                                            "\n",
+                                            "[string] $DomainDNSName,",
+                                            "\n",
+                                            "[string] $GroupName",
+                                            "\n",
+                                            ")",
+                                            "\n",
+                                            "$DomainFQDN = $DomainDNSName.Split(\".\")",
+                                            "\n",
+                                            "$PathUserObject = $(\"CN=$UserName,CN=Users\")",
+                                            "\n",
+                                            "$PathGroupObject = $(\"CN=$GroupName,CN=Users\")",
+                                            "\n",
+                                            "foreach ($DomainFQDNObject in $DomainFQDN)",
+                                            "\n",
+                                            "{",
+                                            "$PathUserObject = $($PathUserObject + \",\")",
+                                            "\n",
+                                            "$PathUserObject = $($PathUserObject + \"DC=\" + $DomainFQDNObject)",
+                                            "\n",
+                                            "$PathGroupObject = $($PathGroupObject + \",\")",
+                                            "\n",
+                                            "$PathGroupObject = $($PathGroupObject + \"DC=\" + $DomainFQDNObject)",
+                                            "\n",
+                                            "}",
+                                            "$user = Get-ADUser $PathUserObject -Server \"$ServerName.$DomainDNSName\"",
+                                            "\n",
+                                            "$group = Get-ADGroup $PathGroupObject -Server \"$ServerName.$DomainDNSName\"",
+                                            "\n",
+                                            "Add-ADGroupMember `",
+                                            "\n",
+                                            "-Identity $group `",
+                                            "\n",
+                                            "-Member $user `",
+                                            "\n",
+                                            "-Server \"$ServerName.$DomainDNSName\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-run-dcpromo" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\RunCommand.bat \"dcpromo /unattend  /ReplicaOrNewDomain:Domain  /NewDomain:Forest  /NewDomainDNSName:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            "  /ForestLevel:4 /DomainNetbiosName:",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            " /DomainLevel:4  /InstallDNS:Yes  /ConfirmGc:Yes  /CreateDNSDelegation:No  /DatabasePath:\"C:\\Windows\\NTDS\"  /LogPath:\"C:\\Windows\\NTDS\"  /SYSVOLPath:\"C:\\Windows\\SYSVOL\" /SafeModeAdminPassword=",
+                                            {
+                                                "Ref" : "RestoreModePassword"
+                                            },
+                                            " /RebootOnCompletion:Yes\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "2-run-CreateUser" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\CreateUser.ps1 -UserName ",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " -AccountPassword ",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " -DomainDNSName ",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "3-run-CreateUser" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\CreateUser.ps1 -UserName ",
+                                            {
+                                                "Ref" : "ExchangeAdminUser"
+                                            },
+                                            " -AccountPassword ",
+                                            {
+                                                "Ref" : "ExchangeAdminPassword"
+                                            },
+                                            " -DomainDNSName ",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-run-JoinGroup"  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\JoinGroup.ps1 -UserName ",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " -ServerName ",
+                                            {
+                                                "Ref" : "ADServer1NetBIOSName"
+                                            },
+                                            " -DomainDNSName ",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " -GroupName 'Domain Admins'",
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "5-run-JoinGroup"  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\JoinGroup.ps1 -UserName ",
+                                            {
+                                                "Ref" : "ExchangeAdminUser"
+                                            },
+                                            " -ServerName ",
+                                            {
+                                                "Ref" : "ADServer1NetBIOSName"
+                                            },
+                                            " -DomainDNSName ",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " -GroupName 'Enterprise Admins'",
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "6-run-JoinGroup"  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\JoinGroup.ps1 -UserName ",
+                                            {
+                                                "Ref" : "ExchangeAdminUser"
+                                            },
+                                            " -ServerName ",
+                                            {
+                                                "Ref" : "ADServer1NetBIOSName"
+                                            },
+                                            " -DomainDNSName ",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " -GroupName 'Schema Admins'",
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "7-run-JoinGroup"  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\JoinGroup.ps1 -UserName ",
+                                            {
+                                                "Ref" : "ExchangeAdminUser"
+                                            },
+                                            " -ServerName ",
+                                            {
+                                                "Ref" : "ADServer1NetBIOSName"
+                                            },
+                                            " -DomainDNSName ",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " -GroupName 'Domain Admins'",
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "createsite" : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\GetSiteCreationPS1File.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/Create-NewADSite_V2.ps1 -Destination c:\\cfn\\scripts\\Create-NewADSite.ps1",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/FinalizeAD.ps1 -Destination c:\\cfn\\scripts\\FinalizeAD.ps1",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-GetSiteCreationPS1File" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\GetSiteCreationPS1File.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "20-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "DC1",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            "\"Default-First-Site-Name\"",
+                                            " -SubnetDescription \"DC_1_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "21-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Repl1",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            "\"Default-First-Site-Name\"",
+                                            " -SubnetDescription \"Replication_1_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "22-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Mapi1",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            "\"Default-First-Site-Name\"",
+                                            " -SubnetDescription \"MAPI_1_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "23-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Client1",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            "\"Default-First-Site-Name\"",
+                                            " -SubnetDescription \"TestClient_1_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "24-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "DC2",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -SubnetDescription \"DC_2_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "25-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Repl2",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -SubnetDescription \"Replication_2_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "26-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Mapi2",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -SubnetDescription \"MAPI_2_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "27-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Client2",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -SubnetDescription \"TestClient_2_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "28-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Public1",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -SubnetDescription \"DMZ1_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "29-execute-powershell-script-Create-NewADSite"      : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -subnetCIDR ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "SubnetConfig",
+                                                    "Public2",
+                                                    "CIDR"
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -SubnetDescription \"DMZ2_Subnet\"",
+                                            " -SubnetLocation ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "finalize"   : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\PSISE.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature powershell-ise",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-PSISE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\PSISE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-execute-powershell-script-FinalizeAD" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\FinalizeAD.ps1 -verbose -debug -newsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -replicationsitename ",
+                                            {
+                                                "Fn::Select" : [
+                                                    0,
+                                                    {
+                                                        "Fn::GetAZs" : ""
+                                                    }
+                                                ]
+                                            },
+                                            " -ADNetbiosName ",
+                                            {
+                                                "Ref" : "ADServer1NetBIOSName"
+                                            }
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "3-signal-success"                       : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "DomainControllerWaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Fn::FindInMap" : [
+                                        "InstanceTypes",
+                                        "ADServerInstance",
+                                        "Type"
+                                    ]
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Fn::FindInMap" : [
+                        "InstanceTypes",
+                        "ADServerInstance",
+                        "Type"
+                    ]
+                },
+                "SubnetId"     : {
+                    "Ref" : "PrivateSubnet1"
+                },
+                "Tags"         : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "ADServer1NetBIOSName"
+                        }
+                    }
+                ],
+                "SecurityGroupIds" : [
+                    {
+                        "Ref" : "SGInternal"
+                    }
+                ],
+                "PrivateIpAddress" : {
+                    "Fn::FindInMap" : [
+                        "ADPrivateIPs",
+                        "DC1",
+                        "IP"
+                    ]
+                },
+                "KeyName"          : {
+                    "Ref" : "KeyPairName"
+                },
+                "BlockDeviceMappings" : [
+                    {
+                        "DeviceName" : "/dev/sda1",
+                        "Ebs"        : {
+                            "VolumeSize" : "100"
+                        }
+                    }
+                ],
+                "UserData"            : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r DomainController ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "DomainController2"                   : {
+            "Type" : "AWS::EC2::Instance",
+            "DependsOn" : "DomainControllerWaitCondition",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "rename",
+                            "join",
+                            "dcpromo",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.DomainController2.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r DomainController2",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\RenameComputer.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ($name)",
+                                            "\n",
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename($name)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1 ",
+                                            {
+                                                "Ref" : "ADServer2NetBIOSName"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-reboot"                                   : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "shutdown -r -t 1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\SetDNSOnNIC.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param($Gateway1)",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"}",
+                                            "\n",
+                                            "Foreach($NIC in $NICs) {$DNSServers = \"$Gateway1\"",
+                                            "\n",
+                                            "$NIC.SetDNSServerSearchOrder($DNSServers)",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration(\"TRUE\")}",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-set-dns-on-nic" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "ADPrivateIPs",
+                                                    "DC1",
+                                                    "IP"
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-join-domain"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "NETDOM join localhost /Domain:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /userd:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /passwordd:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " /reboot"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "3-add-local-admin" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "dcpromo"    : {
+                        "files" : {
+                            "C:\\cfn\\RunCommand.bat" : {
+                                "content" : "%~1\nIF %ERRORLEVEL% GTR 10 ( exit /b 1 ) else ( exit /b 0 )"
+                            }
+                        },
+                        "commands" : {
+                            "1-run-dcpromo-add-DC" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\RunCommand.bat \"dcpromo /unattend  /ReplicaOrNewDomain:Replica",
+                                            " /ReplicaDomainDNSName:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /UserName:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /Password:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            "  /ForestLevel:4 /DomainNetbiosName:",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            " /DomainLevel:4  /InstallDNS:Yes  /ConfirmGc:Yes  /CreateDNSDelegation:No  /DatabasePath:\"C:\\Windows\\NTDS\"  /LogPath:\"C:\\Windows\\NTDS\"  /SYSVOLPath:\"C:\\Windows\\SYSVOL\" /SafeModeAdminPassword=",
+                                            {
+                                                "Ref" : "RestoreModePassword"
+                                            },
+                                            " /RebootOnCompletion:Yes\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "finalize"   : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\PSISE.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature powershell-ise",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-PSISE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\PSISE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-signal-success"                  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "DomainController2WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Fn::FindInMap" : [
+                                        "InstanceTypes",
+                                        "ADServerInstance",
+                                        "Type"
+                                    ]
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Fn::FindInMap" : [
+                        "InstanceTypes",
+                        "ADServerInstance",
+                        "Type"
+                    ]
+                },
+                "SubnetId"     : {
+                    "Ref" : "PrivateSubnet5"
+                },
+                "Tags"         : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "ADServer2NetBIOSName"
+                        }
+                    }
+                ],
+                "SecurityGroupIds" : [
+                    {
+                        "Ref" : "SGInternal"
+                    }
+                ],
+                "PrivateIpAddress" : {
+                    "Fn::FindInMap" : [
+                        "ADPrivateIPs",
+                        "DC2",
+                        "IP"
+                    ]
+                },
+                "KeyName"          : {
+                    "Ref" : "KeyPairName"
+                },
+                "BlockDeviceMappings" : [
+                    {
+                        "DeviceName" : "/dev/sda1",
+                        "Ebs"        : {
+                            "VolumeSize" : "100"
+                        }
+                    }
+                ],
+                "UserData"            : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r DomainController2 ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "RDGateway1"                          : {
+            "Type" : "AWS::EC2::Instance",
+            "DependsOn" : "DomainController2",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "rename",
+                            "join",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.RDGateway1.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r RDGateway1",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\RenameComputer.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename(\"RDGW1\")",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-reboot"                                   : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "shutdown -r -t 1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\SetDNSOnNIC.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param($Gateway1,$Gateway2)",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"}",
+                                            "\n",
+                                            "Foreach($NIC in $NICs) {$DNSServers = \"$Gateway1\",\"$Gateway2\"",
+                                            "\n",
+                                            "$NIC.SetDNSServerSearchOrder($DNSServers)",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration(\"TRUE\")}",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-set-dns-on-nic" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "ADPrivateIPs",
+                                                    "DC1",
+                                                    "IP"
+                                                ]
+                                            },
+                                            " ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "ADPrivateIPs",
+                                                    "DC2",
+                                                    "IP"
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-join-domain"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "NETDOM join localhost /Domain:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /userd:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /passwordd:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " /reboot"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "3-add-local-admin" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "finalize"   : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\PSISE.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature powershell-ise",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\RDGW.ps1"  : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature RDS-Gateway -IncludeAllSubFeature",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-PSISE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\PSISE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-execute-powershell-script-RDGW"  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RDGW.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "3-signal-success"                  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "RDGW1WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Fn::FindInMap" : [
+                                        "InstanceTypes",
+                                        "RDGWInstance",
+                                        "Type"
+                                    ]
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Fn::FindInMap" : [
+                        "InstanceTypes",
+                        "RDGWInstance",
+                        "Type"
+                    ]
+                },
+                "SubnetId"     : {
+                    "Ref" : "PublicSubnet1"
+                },
+                "Tags"         : [
+                    {
+                        "Key" : "Name",
+                        "Value" : "RDGW1"
+                    }
+                ],
+                "SecurityGroupIds" : [
+                    {
+                        "Ref" : "RDGWSecurityGroup"
+                    },
+                    {
+                        "Ref" : "DomainMemberSG"
+                    }
+                ],
+                "KeyName"          : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"         : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r RDGateway1 ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "RDGateway2"                          : {
+            "Type" : "AWS::EC2::Instance",
+            "DependsOn" : "DomainController2",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "rename",
+                            "join",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.RDGateway2.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r RDGateway2",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\RenameComputer.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename(\"RDGW2\")",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-reboot"                                   : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "shutdown -r -t 1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\SetDNSOnNIC.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param($Gateway1,$Gateway2)",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"}",
+                                            "\n",
+                                            "Foreach($NIC in $NICs) {$DNSServers = \"$Gateway1\",\"$Gateway2\"",
+                                            "\n",
+                                            "$NIC.SetDNSServerSearchOrder($DNSServers)",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration(\"TRUE\")}",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-set-dns-on-nic" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "ADPrivateIPs",
+                                                    "DC2",
+                                                    "IP"
+                                                ]
+                                            },
+                                            " ",
+                                            {
+                                                "Fn::FindInMap" : [
+                                                    "ADPrivateIPs",
+                                                    "DC1",
+                                                    "IP"
+                                                ]
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-join-domain"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "NETDOM join localhost /Domain:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /userd:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /passwordd:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " /reboot"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "3-add-local-admin" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "finalize"   : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\PSISE.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature powershell-ise",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\RDGW.ps1"  : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature RDS-Gateway -IncludeAllSubFeature",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-PSISE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\PSISE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-execute-powershell-script-RDGW"  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RDGW.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "3-signal-success"                  : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "RDGW2WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Fn::FindInMap" : [
+                                        "InstanceTypes",
+                                        "RDGWInstance",
+                                        "Type"
+                                    ]
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Fn::FindInMap" : [
+                        "InstanceTypes",
+                        "RDGWInstance",
+                        "Type"
+                    ]
+                },
+                "SubnetId"     : {
+                    "Ref" : "PublicSubnet2"
+                },
+                "Tags"         : [
+                    {
+                        "Key" : "Name",
+                        "Value" : "RDGW2"
+                    }
+                ],
+                "SecurityGroupIds" : [
+                    {
+                        "Ref" : "RDGWSecurityGroup"
+                    },
+                    {
+                        "Ref" : "DomainMemberSG"
+                    }
+                ],
+                "KeyName"          : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"         : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r RDGateway2 ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "DomainControllerWaitCondition"       : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "DomainController",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "DomainControllerWaitHandle"
+                },
+                "Timeout" : "3000"
+            }
+        },
+        "DomainControllerWaitHandle"          : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "DomainController2WaitCondition"      : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "DomainController2",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "DomainController2WaitHandle"
+                },
+                "Timeout" : "3000"
+            }
+        },
+        "DomainController2WaitHandle"         : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "RDGW1WaitCondition"                  : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "RDGateway1",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "RDGW1WaitHandle"
+                },
+                "Timeout" : "2400"
+            }
+        },
+        "RDGW1WaitHandle"                     : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "RDGW2WaitCondition"                  : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "RDGateway2",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "RDGW2WaitHandle"
+                },
+                "Timeout" : "2400"
+            }
+        },
+        "RDGW2WaitHandle"                     : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "SGInternal"                          : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "VPC Internal Security Group",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3389",
+                        "ToPort"     : "3389",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Public1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Public1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3389",
+                        "ToPort"     : "3389",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Public2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Public2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "123",
+                        "ToPort"     : "123",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "135",
+                        "ToPort"     : "135",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "138",
+                        "ToPort"     : "138",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "464",
+                        "ToPort"     : "464",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "464",
+                        "ToPort"     : "464",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "389",
+                        "ToPort"     : "389",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "389",
+                        "ToPort"     : "389",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "636",
+                        "ToPort"     : "636",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3268",
+                        "ToPort"     : "3268",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3269",
+                        "ToPort"     : "3269",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "88",
+                        "ToPort"     : "88",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "88",
+                        "ToPort"     : "88",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "67",
+                        "ToPort"     : "67",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "2535",
+                        "ToPort"     : "2535",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    }
+                ]
+            }
+        },
+        "SGInternalIngressTCP1"               : {
+            "Type" : "AWS::EC2::SecurityGroupIngress",
+            "Properties" : {
+                "GroupId" : {
+                    "Ref" : "SGInternal"
+                },
+                "IpProtocol" : "tcp",
+                "FromPort"   : "1",
+                "ToPort"     : "3388",
+                "SourceSecurityGroupId" : {
+                    "Ref" : "SGInternal"
+                }
+            }
+        },
+        "SGInternalIngressTCP2"               : {
+            "Type" : "AWS::EC2::SecurityGroupIngress",
+            "Properties" : {
+                "GroupId" : {
+                    "Ref" : "SGInternal"
+                },
+                "IpProtocol" : "tcp",
+                "FromPort"   : "3390",
+                "ToPort"     : "65535",
+                "SourceSecurityGroupId" : {
+                    "Ref" : "SGInternal"
+                }
+            }
+        },
+        "SGInternalIngressUDP"                : {
+            "Type" : "AWS::EC2::SecurityGroupIngress",
+            "Properties" : {
+                "GroupId" : {
+                    "Ref" : "SGInternal"
+                },
+                "IpProtocol" : "udp",
+                "FromPort"   : "1",
+                "ToPort"     : "65535",
+                "SourceSecurityGroupId" : {
+                    "Ref" : "SGInternal"
+                }
+            }
+        },
+        "SGInternalIngressICMP"               : {
+            "Type" : "AWS::EC2::SecurityGroupIngress",
+            "Properties" : {
+                "GroupId" : {
+                    "Ref" : "SGInternal"
+                },
+                "IpProtocol" : "icmp",
+                "FromPort"   : "-1",
+                "ToPort"     : "-1",
+                "SourceSecurityGroupId" : {
+                    "Ref" : "SGInternal"
+                }
+            }
+        },
+        "DomainMemberSG"                      : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "Domain Members",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC2",
+                                "CIDR"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "NAT1SecurityGroup"                   : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "Enables SSH access to NAT1 in AZ1 via port 22",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "22",
+                        "ToPort"     : "22",
+                        "CidrIp"     : "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol" : "-1",
+                        "FromPort"   : "1",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "-1",
+                        "FromPort"   : "1",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Repl1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Repl1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "-1",
+                        "FromPort"   : "1",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Mapi1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Mapi1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "-1",
+                        "FromPort"   : "1",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Client1",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Client1",
+                                "CIDR"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "NAT2SecurityGroup"                   : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "Enables SSH access to NAT1 in AZ1 via port 22",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "22",
+                        "ToPort"     : "22",
+                        "CidrIp"     : "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol" : "-1",
+                        "FromPort"   : "1",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "DC2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "-1",
+                        "FromPort"   : "1",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Repl2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Repl2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "-1",
+                        "FromPort"   : "1",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Mapi2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Mapi2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "-1",
+                        "FromPort"   : "1",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Client2",
+                                "CIDR"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Fn::FindInMap" : [
+                                "SubnetConfig",
+                                "Client2",
+                                "CIDR"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "RDGWSecurityGroup"                   : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "Enable RDP access from the Internet",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3389",
+                        "ToPort"     : "3389",
+                        "CidrIp"     : "0.0.0.0/0"
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs"                  : {
+        "RDGW1ElasticIP" : {
+            "Value" : {
+                "Ref" : "Rdgw1EIP"
+            },
+            "Description" : "Elastic IP address of the first Remote Desktop Gateway (RDGW1) in AZ1"
+        },
+        "RDGW2ElasticIP" : {
+            "Value" : {
+                "Ref" : "Rdgw2EIP"
+            },
+            "Description" : "Elastic IP address of the second Remote Desktop Gateway (RDGW2) in AZ2"
+        },
+        "AD1PrivateIP"   : {
+            "Value" : {
+                "Fn::FindInMap" : [
+                    "ADPrivateIPs",
+                    "DC1",
+                    "IP"
+                ]
+            },
+            "Description" : "Private IP address of the first Domain Controller (DC1) in AZ1"
+        },
+        "AD2PrivateIP"   : {
+            "Value" : {
+                "Fn::FindInMap" : [
+                    "ADPrivateIPs",
+                    "DC2",
+                    "IP"
+                ]
+            },
+            "Description" : "Private IP address of the second Domain Controller (DC2) in AZ2"
+        },
+        "SGInternalID"   : {
+            "Value" : {
+                "Ref" : "SGInternal"
+            },
+            "Description" : "ID of the VPC internal Security Group"
+        },
+        "VPCID"          : {
+            "Value" : {
+                "Ref" : "VPC"
+            },
+            "Description" : "ID of the VPC"
+        },
+        "MB1ServerSubnetID" : {
+            "Value" : {
+                "Ref" : "PrivateSubnet3"
+            },
+            "Description" : "ID of the MAPI Subnet 1"
+        },
+        "MB2ServerSubnetID" : {
+            "Value" : {
+                "Ref" : "PrivateSubnet7"
+            },
+            "Description" : "ID of the MAPI Subnet 2"
+        },
+        "ReplicationSubnet1ID" : {
+            "Value" : {
+                "Ref" : "PrivateSubnet2"
+            },
+            "Description" : "ID of the Replication Subnet 1"
+        },
+        "ReplicationSubnet2ID" : {
+            "Value" : {
+                "Ref" : "PrivateSubnet6"
+            },
+            "Description" : "ID of the Replication Subnet 2"
+        }
+    }
+}
