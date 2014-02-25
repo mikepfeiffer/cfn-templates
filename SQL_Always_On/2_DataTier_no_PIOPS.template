@@ -1,0 +1,1105 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Description"              : "**Version 1.0** STEP-2 This template creates and installs 2 Windows Server 2008 R2 based WSFC cluster nodes into seperate subnet inside a VPC. It attached two additional PIOPS striped volume sets, Volume D and E, to hold the databases and the Log files. Default Domain Administrator password will be the one retrieved from the instance. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
+    "Parameters"               : {
+        "KeyPairName" : {
+            "Description" : "Public/private key pairs allow you to securely connect to your instance after it launches",
+            "Type"        : "String"
+        },
+        "WSFCNode1InstanceType" : {
+            "Description" : "Amazon EC2 instance type for the 1st WSFC Node",
+            "Type"        : "String",
+            "Default"     : "m2.4xlarge",
+            "AllowedValues" : [
+                "m1.large",
+                "m1.xlarge",
+                "m2.4xlarge"
+            ],
+            "ConstraintDescription" : "Only EBS Optimized instance types m1.large, m1.xlarge, m2.4xlarge allowed"
+        },
+        "WSFCNode2InstanceType" : {
+            "Description" : "Amazon EC2 instance type for the 2nd WSFC Node",
+            "Type"        : "String",
+            "Default"     : "m2.4xlarge",
+            "AllowedValues" : [
+                "m1.large",
+                "m1.xlarge",
+                "m2.4xlarge"
+            ],
+            "ConstraintDescription" : "Only EBS Optimized instance types m1.large, m1.xlarge, m2.4xlarge allowed"
+        },
+        "DomainDNSName"         : {
+            "Description" : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.com",
+            "Type"        : "String",
+            "Default"     : "contoso.com",
+            "MinLength"   : "3",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "DomainNetBIOSName"     : {
+            "Description" : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. CORP",
+            "Type"        : "String",
+            "Default"     : "contoso",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "WSFCNode1NetBIOSName"  : {
+            "Description" : "NetBIOS name of the 1st WSFC Node (up to 15 characters)",
+            "Type"        : "String",
+            "Default"     : "WSFCNode1",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "WSFCNode2NetBIOSName"  : {
+            "Description" : "NetBIOS name of the 2nd WSFC Node (up to 15 characters)",
+            "Type"        : "String",
+            "Default"     : "WSFCNode2",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "DomainAdminUser"       : {
+            "Description" : "User name for the account that will be added as Domain Administrator. This is separate from the default \"Administrator\" account",
+            "Type"        : "String",
+            "Default"     : "StackAdmin",
+            "MinLength"   : "5",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]*"
+        },
+        "DomainAdminPassword"   : {
+            "Description" : "Password for the domain admin user. Must be at least 8 characters containing letters, numbers and symbols",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "true",
+            "Default"        : "Password123"
+        },
+        "SQLServiceAccount"     : {
+            "Description" : "User name for the SQL Server Service Account. This Account is a Domain User.",
+            "Type"        : "String",
+            "Default"     : "sqlsa",
+            "MinLength"   : "5",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]*"
+        },
+        "SQLServiceAccountPassword" : {
+            "Description" : "Password for the SQL Service account. Must be at least 8 characters containing letters, numbers and symbols",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "true",
+            "Default"        : "Password123"
+        },
+        "ADServer1PrivateIp"        : {
+            "Description" : "Fixed private IP for the first Active Directory server located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.1.10"
+        },
+        "ADServer2PrivateIp"        : {
+            "Description" : "Fixed private IP for the second Active Directory serverr located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.5.10"
+        },
+        "WSFCNode1PrivateIp"        : {
+            "Description" : "Fixed private IP for the 1st WSFC Node located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.2.100"
+        },
+        "WSFCNode2PrivateIp"        : {
+            "Description" : "Fixed private IP for the 2nd WSFC Node located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.6.100"
+        },
+        "DomainMemberSGID"          : {
+            "Description" : "ID of the Domain Member Security Group",
+            "Type"        : "String"
+        },
+        "WSFCServerSecurityGroupID" : {
+            "Description" : "ID of the WSFC and AlwaysOn AG Security Group",
+            "Type"        : "String"
+        },
+        "VPC"                       : {
+            "Description" : "ID of the VPC",
+            "Type"        : "String"
+        },
+        "WSFCNode1Subnet"           : {
+            "Description" : "ID of the subnet you want to provision the first WSFC node into.",
+            "Type"        : "String"
+        },
+        "WSFCNode2Subnet"           : {
+            "Description" : "ID of the subnet you want to provision the second WSFC node into.",
+            "Type"        : "String"
+        }
+    },
+    "Mappings"                 : {
+        "AWSInstanceType2Arch" : {
+            "m1.small" : {
+                "Arch" : "64"
+            },
+            "m1.medium" : {
+                "Arch" : "64"
+            },
+            "m1.large"  : {
+                "Arch" : "64"
+            },
+            "m1.xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.2xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.4xlarge" : {
+                "Arch" : "64"
+            },
+            "c1.medium"  : {
+                "Arch" : "64"
+            },
+            "c1.xlarge"  : {
+                "Arch" : "64"
+            }
+        },
+        "AWSRegionArch2AMI"    : {
+            "us-east-1" : {
+                "64" : "ami-37b1b45e"
+            },
+            "eu-west-1" : {
+                "64" : "ami-a2b242d5"
+            },
+            "ap-northeast-1" : {
+                "64" : "ami-6b6c196a"
+            },
+            "us-west-1"      : {
+                "64" : "ami-c287ba87"
+            },
+            "us-west-2"      : {
+                "64" : "ami-208be910"
+            },
+            "ap-southeast-1" : {
+                "64" : "ami-4cf7a11e"
+            },
+            "ap-southeast-2" : {
+                "64" : "ami-1922bc23"
+            },
+            "sa-east-1"      : {
+                "64" : "ami-85f65598"
+            }
+        }
+    },
+    "Resources"                : {
+        "WSFCNode1WaitCondition" : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "WSFCNode2",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "WSFCNode1WaitHandle"
+                },
+                "Timeout" : "3600"
+            }
+        },
+        "WSFCNode1WaitHandle"    : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "WSFCNode2WaitCondition" : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "WSFCNode2",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "WSFCNode2WaitHandle"
+                },
+                "Timeout" : "3600"
+            }
+        },
+        "WSFCNode2WaitHandle"    : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "WSFCNode1"              : {
+            "Type" : "AWS::EC2::Instance",
+            "Metadata" : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "rename",
+                            "join",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.WSFCNode1.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r WSFCNode1",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\RenameComputer.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ($name)",
+                                            "\n",
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename($name)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1 ",
+                                            {
+                                                "Ref" : "WSFCNode1NetBIOSName"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-reboot"                                   : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "shutdown -r -t 1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\SetDNSOnNIC.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param($Gateway1,$Gateway2)",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"}",
+                                            "\n",
+                                            "Foreach($NIC in $NICs) {$DNSServers = \"$Gateway1\",\"$Gateway2\"",
+                                            "\n",
+                                            "$NIC.SetDNSServerSearchOrder($DNSServers)",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration(\"TRUE\")}",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-set-dns-on-nic" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
+                                            {
+                                                "Ref" : "ADServer1PrivateIp"
+                                            },
+                                            " ",
+                                            {
+                                                "Ref" : "ADServer2PrivateIp"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-join-domain"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "NETDOM join localhost /Domain:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /userd:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /passwordd:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " /reboot"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "3-add-local-admin" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-add-sqlsa-to-local-admin" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "finalize"   : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\WSFC.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature failover-clustering",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\ScriptDownloadSQLEE.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/DownloadSQLEE.ps1 -Destination c:\\cfn\\scripts\\DownloadSQLEE.ps1",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"   : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/OpenWSFCPorts.bat -Destination C:\\cfn\\scripts\\OpenWSFCPorts.bat",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-WSFC" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\WSFC.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-execute-powershell-script-DownloadSQLEE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\ScriptDownloadSQLEE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "3-execute-powershell-DownloadSQLEE"        : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadSQLEE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-execute-powershell-DownloadWSFCPorts"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "5-open-WSFC-ports"                         : {
+                                "command" : "C:\\cfn\\scripts\\OpenWSFCPorts.bat"
+                            },
+                            "6-signal-success"                          : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "WSFCNode1WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Ref" : "WSFCNode1InstanceType"
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Ref" : "WSFCNode1InstanceType"
+                },
+                "SubnetId"     : {
+                    "Ref" : "WSFCNode1Subnet"
+                },
+                "EbsOptimized" : "true",
+                "PrivateIpAddress" : {
+                    "Ref" : "WSFCNode1PrivateIp"
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "WSFCNode1NetBIOSName"
+                        }
+                    }
+                ],
+                "BlockDeviceMappings" : [
+                    {
+                        "DeviceName" : "/dev/sda1",
+                        "Ebs"        : {
+                            "VolumeSize" : "100"
+                        }
+                    }
+                ],
+                "SecurityGroupIds"    : [
+                    {
+                        "Ref" : "DomainMemberSGID"
+                    },
+                    {
+                        "Ref" : "WSFCServerSecurityGroupID"
+                    }
+                ],
+                "KeyName"             : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"            : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r WSFCNode1 ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "WSFCNode2"              : {
+            "Type" : "AWS::EC2::Instance",
+            "DependsOn" : "WSFCNode1",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "rename",
+                            "join",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.WSFCNode2.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r WSFCNode2",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\RenameComputer.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "param ($name)",
+                                            "\n",
+                                            "$sysInfo = Get-WmiObject -Class Win32_ComputerSystem",
+                                            "\n",
+                                            "$sysInfo.Rename($name)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\RenameComputer.ps1 ",
+                                            {
+                                                "Ref" : "WSFCNode2NetBIOSName"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-reboot"                                   : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "shutdown -r -t 1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\SetDNSOnNIC.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "\n",
+                                        [
+                                            "param($Gateway1,$Gateway2)",
+                                            "$NICs = Get-WMIObject Win32_NetworkAdapterConfiguration | where{$_.IPEnabled -eq \"TRUE\"}",
+                                            "\n",
+                                            "Foreach($NIC in $NICs) {$DNSServers = \"$Gateway1\",\"$Gateway2\"",
+                                            "\n",
+                                            "$NIC.SetDNSServerSearchOrder($DNSServers)",
+                                            "\n",
+                                            "$NIC.SetDynamicDNSRegistration(\"TRUE\")}",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-set-dns-on-nic" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
+                                            {
+                                                "Ref" : "ADServer2PrivateIp"
+                                            },
+                                            " ",
+                                            {
+                                                "Ref" : "ADServer1PrivateIp"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            },
+                            "2-join-domain"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "NETDOM join localhost /Domain:",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " /userd:",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " /passwordd:",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " /reboot"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "forever"
+                            },
+                            "3-add-local-admin" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-add-sqlsa-to-local-admin" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "net localgroup \"Administrators\" \"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            "\" /add"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "finalize"   : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\WSFC.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "add-windowsfeature failover-clustering",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\ScriptDownloadSQLEE.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/DownloadSQLEE.ps1 -Destination c:\\cfn\\scripts\\DownloadSQLEE.ps1",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"   : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/OpenWSFCPorts.bat -Destination C:\\cfn\\scripts\\OpenWSFCPorts.bat",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-execute-powershell-script-WSFC" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\WSFC.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-execute-powershell-script-DownloadSQLEE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\ScriptDownloadSQLEE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "3-execute-powershell-DownloadSQLEE"        : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadSQLEE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "4-execute-powershell-DownloadWSFCPorts"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "5-open-WSFC-ports"                         : {
+                                "command" : "C:\\cfn\\scripts\\OpenWSFCPorts.bat"
+                            },
+                            "6-signal-success"                          : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "WSFCNode2WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Ref" : "WSFCNode2InstanceType"
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Ref" : "WSFCNode2InstanceType"
+                },
+                "SubnetId"     : {
+                    "Ref" : "WSFCNode2Subnet"
+                },
+                "EbsOptimized" : "true",
+                "PrivateIpAddress" : {
+                    "Ref" : "WSFCNode2PrivateIp"
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "WSFCNode2NetBIOSName"
+                        }
+                    }
+                ],
+                "BlockDeviceMappings" : [
+                    {
+                        "DeviceName" : "/dev/sda1",
+                        "Ebs"        : {
+                            "VolumeSize" : "100"
+                        }
+                    }
+                ],
+                "SecurityGroupIds"    : [
+                    {
+                        "Ref" : "DomainMemberSGID"
+                    },
+                    {
+                        "Ref" : "WSFCServerSecurityGroupID"
+                    }
+                ],
+                "KeyName"             : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"            : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r WSFCNode2 ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        }
+    },
+    "Outputs"                  : {
+        "DomainAdmin" : {
+            "Value" : {
+                "Fn::Join" : [
+                    "",
+                    [
+                        {
+                            "Ref" : "DomainNetBIOSName"
+                        },
+                        "\\",
+                        {
+                            "Ref" : "DomainAdminUser"
+                        }
+                    ]
+                ]
+            },
+            "Description" : "Domain administrator account"
+        },
+        "LocalAdmin"  : {
+            "Value" : "Administrator",
+            "Description" : "Please retrieve Administrator password of the instance"
+        },
+        "WSFCNode1NetBIOSName" : {
+            "Value" : {
+                "Ref" : "WSFCNode1NetBIOSName"
+            },
+            "Description" : "NetBIOS name of the 1st WSFC Node"
+        },
+        "WSFCNode2NetBIOSName" : {
+            "Value" : {
+                "Ref" : "WSFCNode2NetBIOSName"
+            },
+            "Description" : "NetBIOS name of the 2nd WSFC Node"
+        }
+    }
+}

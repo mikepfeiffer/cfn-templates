@@ -146,28 +146,28 @@
         },
         "AWSRegionArch2AMI"    : {
             "us-east-1" : {
-                "64" : "ami-7f236a16"
+                "64" : "ami-37b1b45e"
             },
             "eu-west-1" : {
-                "64" : "ami-423dd835"
+                "64" : "ami-a2b242d5"
             },
             "ap-northeast-1" : {
-                "64" : "ami-69dd4168"
+                "64" : "ami-6b6c196a"
             },
             "us-west-1"      : {
-                "64" : "ami-d0261395"
+                "64" : "ami-c287ba87"
             },
             "us-west-2"      : {
-                "64" : "ami-54de4164"
+                "64" : "ami-208be910"
             },
             "ap-southeast-1" : {
-                "64" : "ami-048dc656"
+                "64" : "ami-4cf7a11e"
             },
             "ap-southeast-2" : {
-                "64" : "ami-f59e03cf"
+                "64" : "ami-1922bc23"
             },
             "sa-east-1"      : {
-                "64" : "ami-57d4734a"
+                "64" : "ami-85f65598"
             }
         },
         "ReplicationSubnetIPs" : {

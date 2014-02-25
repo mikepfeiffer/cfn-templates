@@ -112,29 +112,29 @@
             }
         },
         "AWSRegionArch2AMI"    : {
-            "eu-west-1" : {
-                "64" : "ami-3937da4e"
-            },
-            "sa-east-1" : {
-                "64" : "ami-9b3a9c86"
-            },
             "us-east-1" : {
-                "64" : "ami-7527031c"
+                "64" : "ami-814642e8"
+            },
+            "eu-west-1" : {
+                "64" : "ami-4eb74739"
             },
             "ap-northeast-1" : {
-                "64" : "ami-b1492eb0"
-            },
-            "us-west-2"      : {
-                "64" : "ami-b652c986"
+                "64" : "ami-7d681d7c"
             },
             "us-west-1"      : {
-                "64" : "ami-0285b347"
+                "64" : "ami-2a80bd6f"
+            },
+            "us-west-2"      : {
+                "64" : "ami-bc92f08c"
             },
             "ap-southeast-1" : {
-                "64" : "ami-dccc998e"
+                "64" : "ami-9ef4a2cc"
             },
             "ap-southeast-2" : {
-                "64" : "ami-9d3fa3a7"
+                "64" : "ami-2b23bd11"
+            },
+            "sa-east-1"      : {
+                "64" : "ami-85f55698"
             }
         }
     },

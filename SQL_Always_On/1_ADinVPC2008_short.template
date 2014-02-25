@@ -1,12 +1,44 @@
 {
     "AWSTemplateFormatVersion" : "2010-09-09",
-    "Description"              : "**Version 1.0** ***Exchange2010-Infrastructure-and-AD*** STEP-1 This template creates a VPC infrastructure for a multi-AZ, multi-tier deployment of a Windows based Application infrstructure. It installs 2 Active Directory Domain Controllers into subnets in seperate AZs inside a VPC, as well as Remote Desktop Gateway and NAT instances into the DMZ for each Availability Zone. The default Domain Administrator password will be the one retrieved from the instance.  For adding members to the domain, ensure that they are launched into the domain member security group created by this template and then configure them to use the AD instances fixed private IP addresses as the DNS server. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
+    "Description"              : "**Version 1.3** STEP-1 This template creates a VPC infrastructure for a multi-AZ, multi-tier deployment of a Windows based Application infrstructure. It installs 2 Active Directory Domain Controllers into subnets in seperate AZs inside a VPC, as well as Remote Desktop Gateway and NAT instances into the DMZ for each Availability Zone. The default Domain Administrator password will be the one retrieved from the instance.  For adding members to the domain, ensure that they are launched into the domain member security group created by this template and then configure them to use the AD instances fixed private IP addresses as the DNS server. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
     "Parameters"               : {
         "KeyPairName" : {
             "Description" : "Public/private key pairs allow you to securely connect to your instance after it launches",
             "Type"        : "String"
         },
-        "ADServer1NetBIOSName" : {
+        "ADServer1InstanceType" : {
+            "Description" : "Amazon EC2 instance type for the first Active Directory Instance",
+            "Type"        : "String",
+            "Default"     : "m1.xlarge",
+            "AllowedValues" : [
+                "m1.small",
+                "m1.medium",
+                "m1.large",
+                "m1.xlarge",
+                "m2.xlarge",
+                "m2.2xlarge",
+                "m2.4xlarge",
+                "c1.medium",
+                "c1.xlarge"
+            ]
+        },
+        "ADServer2InstanceType" : {
+            "Description" : "Amazon EC2 instance type for the second Active Directory Instance",
+            "Type"        : "String",
+            "Default"     : "m1.xlarge",
+            "AllowedValues" : [
+                "m1.small",
+                "m1.medium",
+                "m1.large",
+                "m1.xlarge",
+                "m2.xlarge",
+                "m2.2xlarge",
+                "m2.4xlarge",
+                "c1.medium",
+                "c1.xlarge"
+            ]
+        },
+        "ADServer1NetBIOSName"  : {
             "Description" : "NetBIOS name of the 1st AD Server (upto 15 characters)",
             "Type"        : "String",
             "Default"     : "DC1",
@@ -14,7 +46,7 @@
             "MaxLength"   : "15",
             "AllowedPattern" : "[a-zA-Z0-9]+"
         },
-        "ADServer2NetBIOSName" : {
+        "ADServer2NetBIOSName"  : {
             "Description" : "NetBIOS name of the 2nd AD Server (upto 15 characters)",
             "Type"        : "String",
             "Default"     : "DC2",
@@ -22,21 +54,60 @@
             "MaxLength"   : "15",
             "AllowedPattern" : "[a-zA-Z0-9]+"
         },
-        "DomainDNSName"        : {
+        "ADServer1PrivateIp"    : {
+            "Description" : "Fixed private IP for the first Active Directory server located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.1.10"
+        },
+        "ADServer2PrivateIp"    : {
+            "Description" : "Fixed private IP for the second Active Directory serverr located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.5.10"
+        },
+        "NATInstanceType"       : {
+            "Description" : "Amazon EC2 instance type for the NAT Instances",
+            "Type"        : "String",
+            "Default"     : "m1.small",
+            "AllowedValues" : [
+                "m1.small",
+                "m1.medium",
+                "m1.large",
+                "m1.xlarge"
+            ]
+        },
+        "RDGWInstanceType"      : {
+            "Description" : "Amazon EC2 instance type for the Remote Desktop Gatweway Instance",
+            "Type"        : "String",
+            "Default"     : "m1.large",
+            "AllowedValues" : [
+                "m1.small",
+                "m1.medium",
+                "m1.large",
+                "m1.xlarge",
+                "m2.xlarge",
+                "m2.2xlarge",
+                "m2.4xlarge",
+                "c1.medium",
+                "c1.xlarge"
+            ]
+        },
+        "DomainDNSName"         : {
             "Description" : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.com",
             "Type"        : "String",
+            "Default"     : "contoso.com",
             "MinLength"   : "3",
             "MaxLength"   : "25",
             "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
         },
-        "DomainNetBIOSName"    : {
-            "Description" : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. example",
+        "DomainNetBIOSName"     : {
+            "Description" : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. CORP",
             "Type"        : "String",
+            "Default"     : "contoso",
             "MinLength"   : "1",
             "MaxLength"   : "15",
             "AllowedPattern" : "[a-zA-Z0-9]+"
         },
-        "RestoreModePassword"  : {
+        "RestoreModePassword"   : {
             "Description" : "Password for a separate Administrator account when the domain controller is in Restore Mode. Must be at least 8 characters containing letters, numbers and symbols",
             "Type"        : "String",
             "MinLength"   : "8",
@@ -45,7 +116,7 @@
             "NoEcho"         : "True",
             "Default"        : "Password123"
         },
-        "DomainAdminUser"      : {
+        "DomainAdminUser"       : {
             "Description" : "User name for the account that will be added as Domain Administrator. This is separate from the default \"Administrator\" account",
             "Type"        : "String",
             "Default"     : "StackAdmin",
@@ -53,7 +124,7 @@
             "MaxLength"   : "25",
             "AllowedPattern" : "[a-zA-Z0-9]*"
         },
-        "DomainAdminPassword"  : {
+        "DomainAdminPassword"   : {
             "Description" : "Password for the domain admin user. Must be at least 8 characters containing letters and numbers",
             "Type"        : "String",
             "MinLength"   : "8",
@@ -62,22 +133,88 @@
             "NoEcho"         : "true",
             "Default"        : "Password123"
         },
-        "ExchangeAdminUser"    : {
-            "Description" : "User name for the Exchange Server Admin Account. This Account is a member of the Domain, Enterprise and Schema Admins Groups.",
+        "SQLAdminUser"          : {
+            "Description" : "User name for the SQL Server Admin Account. This Account is a Domain User.",
             "Type"        : "String",
-            "Default"     : "exadmin",
+            "Default"     : "sqlsa",
             "MinLength"   : "5",
             "MaxLength"   : "25",
             "AllowedPattern" : "[a-zA-Z0-9]*"
         },
-        "ExchangeAdminPassword" : {
-            "Description" : "Password for the Exchange admin user. Must be at least 8 characters containing letters, numbers and symbols",
+        "SQLAdminPassword"      : {
+            "Description" : "Password for the SQL admin user. Must be at least 8 characters containing letters, numbers and symbols",
             "Type"        : "String",
             "MinLength"   : "8",
             "MaxLength"   : "32",
             "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
             "NoEcho"         : "true",
             "Default"        : "Password123"
+        },
+        "PublicSubnet1CIDR"     : {
+            "Description" : "CIDR Block for the Public Subnet located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.9.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "PublicSubnet2CIDR"     : {
+            "Description" : "CIDR Block for the Public Subnet located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.10.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "PrivateSubnet1CIDR"    : {
+            "Description" : "CIDR Block for Privat Subnet 1 located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.1.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "PrivateSubnet2CIDR"    : {
+            "Description" : "CIDR Block for Private Subnet 2 located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.2.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "PrivateSubnet3CIDR"    : {
+            "Description" : "CIDR Block for Private Subnet 3 located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.3.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "PrivateSubnet4CIDR"    : {
+            "Description" : "CIDR Block for Private Subnet 4 located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.4.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "PrivateSubnet5CIDR"    : {
+            "Description" : "CIDR Block for Private Subnet 5 located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.5.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "PrivateSubnet6CIDR"    : {
+            "Description" : "CIDR Block for Private Subnet 6 located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.6.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "PrivateSubnet7CIDR"    : {
+            "Description" : "CIDR Block for Private Subnet 7 located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.7.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "PrivateSubnet8CIDR"    : {
+            "Description" : "CIDR Block for Private Subnet 8 located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.8.0/24",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "VPCCIDR"               : {
+            "Description" : "CIDR Block for the VPC",
+            "Type"        : "String",
+            "Default"     : "10.0.0.0/16",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
         }
     },
     "Mappings"                 : {
@@ -161,64 +298,10 @@
             "ap-southeast-2" : {
                 "64" : "ami-ab990e91"
             }
-        },
-        "SubnetConfig"         : {
-            "VPC" : {
-                "CIDR" : "10.0.0.0/16"
-            },
-            "DC1" : {
-                "CIDR" : "10.0.1.0/24"
-            },
-            "Repl1" : {
-                "CIDR" : "10.0.2.0/24"
-            },
-            "Mapi1" : {
-                "CIDR" : "10.0.3.0/24"
-            },
-            "Client1" : {
-                "CIDR" : "10.0.4.0/24"
-            },
-            "DC2"     : {
-                "CIDR" : "10.0.5.0/24"
-            },
-            "Repl2"   : {
-                "CIDR" : "10.0.6.0/24"
-            },
-            "Mapi2"   : {
-                "CIDR" : "10.0.7.0/24"
-            },
-            "Client2" : {
-                "CIDR" : "10.0.8.0/24"
-            },
-            "Public1" : {
-                "CIDR" : "10.0.9.0/24"
-            },
-            "Public2" : {
-                "CIDR" : "10.0.10.0/24"
-            }
-        },
-        "InstanceTypes"        : {
-            "NATInstance" : {
-                "Type" : "m1.small"
-            },
-            "RDGWInstance" : {
-                "Type" : "m1.medium"
-            },
-            "ADServerInstance" : {
-                "Type" : "m1.xlarge"
-            }
-        },
-        "ADPrivateIPs"         : {
-            "DC1" : {
-                "IP" : "10.0.1.10"
-            },
-            "DC2" : {
-                "IP" : "10.0.5.10"
-            }
         }
     },
     "Resources"                : {
-        "DhcpOptions" : {
+        "ContosoDhcpOptions" : {
             "Type" : "AWS::EC2::DHCPOptions",
             "Properties" : {
                 "DomainName" : {
@@ -229,27 +312,15 @@
                 ],
                 "NtpServers"        : [
                     {
-                        "Fn::FindInMap" : [
-                            "ADPrivateIPs",
-                            "DC1",
-                            "IP"
-                        ]
+                        "Ref" : "ADServer1PrivateIp"
                     }
                 ],
                 "NetbiosNameServers" : [
                     {
-                        "Fn::FindInMap" : [
-                            "ADPrivateIPs",
-                            "DC1",
-                            "IP"
-                        ]
+                        "Ref" : "ADServer1PrivateIp"
                     },
                     {
-                        "Fn::FindInMap" : [
-                            "ADPrivateIPs",
-                            "DC2",
-                            "IP"
-                        ]
+                        "Ref" : "ADServer2PrivateIp"
                     }
                 ],
                 "NetbiosNodeType"    : "2",
@@ -263,15 +334,11 @@
                 ]
             }
         },
-        "VPC"         : {
+        "VPC"                : {
             "Type" : "AWS::EC2::VPC",
             "Properties" : {
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "VPC",
-                        "CIDR"
-                    ]
+                    "Ref" : "VPCCIDR"
                 },
                 "Tags"      : [
                     {
@@ -287,29 +354,25 @@
                 ]
             }
         },
-        "VPCDHCPOptionsAssociation" : {
+        "ContosoVPCDHCPOptionsAssociation" : {
             "Type" : "AWS::EC2::VPCDHCPOptionsAssociation",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "DhcpOptionsId" : {
-                    "Ref" : "DhcpOptions"
+                    "Ref" : "ContosoDhcpOptions"
                 }
             }
         },
-        "PublicSubnet1"             : {
+        "PublicSubnet1"                    : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "Public1",
-                        "CIDR"
-                    ]
+                    "Ref" : "PublicSubnet1CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -337,18 +400,14 @@
                 ]
             }
         },
-        "PublicSubnet2"             : {
+        "PublicSubnet2"                    : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "Public2",
-                        "CIDR"
-                    ]
+                    "Ref" : "PublicSubnet2CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -376,18 +435,14 @@
                 ]
             }
         },
-        "PrivateSubnet1"            : {
+        "PrivateSubnet1"                   : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "DC1",
-                        "CIDR"
-                    ]
+                    "Ref" : "PrivateSubnet1CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -410,23 +465,19 @@
                     },
                     {
                         "Key" : "Role",
-                        "Value" : "DC1 Subnet"
+                        "Value" : "AD1 Subnet"
                     }
                 ]
             }
         },
-        "PrivateSubnet2"            : {
+        "PrivateSubnet2"                   : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "Repl1",
-                        "CIDR"
-                    ]
+                    "Ref" : "PrivateSubnet2CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -449,23 +500,19 @@
                     },
                     {
                         "Key" : "Role",
-                        "Value" : "Replication Subnet 1"
+                        "Value" : "DB1 Subnet"
                     }
                 ]
             }
         },
-        "PrivateSubnet3"            : {
+        "PrivateSubnet3"                   : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "Mapi1",
-                        "CIDR"
-                    ]
+                    "Ref" : "PrivateSubnet3CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -488,23 +535,19 @@
                     },
                     {
                         "Key" : "Role",
-                        "Value" : "Mapi Subnet 1"
+                        "Value" : "APPSVR1 Subnet"
                     }
                 ]
             }
         },
-        "PrivateSubnet4"            : {
+        "PrivateSubnet4"                   : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "Client1",
-                        "CIDR"
-                    ]
+                    "Ref" : "PrivateSubnet4CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -527,23 +570,19 @@
                     },
                     {
                         "Key" : "Role",
-                        "Value" : "Client Subnet 1"
+                        "Value" : "WebSVR1 Subnet"
                     }
                 ]
             }
         },
-        "PrivateSubnet5"            : {
+        "PrivateSubnet5"                   : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "DC2",
-                        "CIDR"
-                    ]
+                    "Ref" : "PrivateSubnet5CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -566,23 +605,19 @@
                     },
                     {
                         "Key" : "Role",
-                        "Value" : "DC2 Subnet"
+                        "Value" : "AD2 Subnet"
                     }
                 ]
             }
         },
-        "PrivateSubnet6"            : {
+        "PrivateSubnet6"                   : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "Repl2",
-                        "CIDR"
-                    ]
+                    "Ref" : "PrivateSubnet6CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -605,23 +640,19 @@
                     },
                     {
                         "Key" : "Role",
-                        "Value" : "Replication Subnet 2"
+                        "Value" : "DB2 Subnet"
                     }
                 ]
             }
         },
-        "PrivateSubnet7"            : {
+        "PrivateSubnet7"                   : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "Mapi2",
-                        "CIDR"
-                    ]
+                    "Ref" : "PrivateSubnet7CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -644,23 +675,19 @@
                     },
                     {
                         "Key" : "Role",
-                        "Value" : "Mapi Subnet 2"
+                        "Value" : "APPSVR2 Subnet"
                     }
                 ]
             }
         },
-        "PrivateSubnet8"            : {
+        "PrivateSubnet8"                   : {
             "Type" : "AWS::EC2::Subnet",
             "Properties" : {
                 "VpcId" : {
                     "Ref" : "VPC"
                 },
                 "CidrBlock" : {
-                    "Fn::FindInMap" : [
-                        "SubnetConfig",
-                        "Client2",
-                        "CIDR"
-                    ]
+                    "Ref" : "PrivateSubnet8CIDR"
                 },
                 "AvailabilityZone" : {
                     "Fn::Select" : [
@@ -683,12 +710,12 @@
                     },
                     {
                         "Key" : "Role",
-                        "Value" : "Client Subnet 2"
+                        "Value" : "WebSVR2 Subnet"
                     }
                 ]
             }
         },
-        "InternetGateway"           : {
+        "InternetGateway"                  : {
             "Type" : "AWS::EC2::InternetGateway",
             "Properties" : {
                 "Tags" : [
@@ -705,7 +732,7 @@
                 ]
             }
         },
-        "AttachGateway"             : {
+        "AttachGateway"                    : {
             "Type" : "AWS::EC2::VPCGatewayAttachment",
             "Properties" : {
                 "VpcId" : {
@@ -716,7 +743,7 @@
                 }
             }
         },
-        "PublicRouteTable"          : {
+        "PublicRouteTable"                 : {
             "Type" : "AWS::EC2::RouteTable",
             "Properties" : {
                 "VpcId" : {
@@ -736,7 +763,7 @@
                 ]
             }
         },
-        "PublicRoute"               : {
+        "PublicRoute"                      : {
             "Type" : "AWS::EC2::Route",
             "Properties" : {
                 "RouteTableId" : {
@@ -764,28 +791,6 @@
             "Properties" : {
                 "SubnetId" : {
                     "Ref" : "PublicSubnet2"
-                },
-                "RouteTableId" : {
-                    "Ref" : "PublicRouteTable"
-                }
-            }
-        },
-        "MAPINetwork1RouteTableAssociation"  : {
-            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
-            "Properties" : {
-                "SubnetId" : {
-                    "Ref" : "PrivateSubnet3"
-                },
-                "RouteTableId" : {
-                    "Ref" : "PublicRouteTable"
-                }
-            }
-        },
-        "MAPINetwork2RouteTableAssociation"  : {
-            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
-            "Properties" : {
-                "SubnetId" : {
-                    "Ref" : "PrivateSubnet7"
                 },
                 "RouteTableId" : {
                     "Ref" : "PublicRouteTable"
@@ -840,6 +845,17 @@
             "Properties" : {
                 "SubnetId" : {
                     "Ref" : "PrivateSubnet2"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable1"
+                }
+            }
+        },
+        "PrivateSubnetRouteTableAssociation3" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet3"
                 },
                 "RouteTableId" : {
                     "Ref" : "PrivateRouteTable1"
@@ -911,6 +927,17 @@
                 }
             }
         },
+        "PrivateSubnetRouteTableAssociation7" : {
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : {
+                    "Ref" : "PrivateSubnet7"
+                },
+                "RouteTableId" : {
+                    "Ref" : "PrivateRouteTable2"
+                }
+            }
+        },
         "PrivateSubnetRouteTableAssociation8" : {
             "Type" : "AWS::EC2::SubnetRouteTableAssociation",
             "Properties" : {
@@ -971,11 +998,7 @@
                             "Fn::FindInMap" : [
                                 "AWSInstanceType2Arch",
                                 {
-                                    "Fn::FindInMap" : [
-                                        "InstanceTypes",
-                                        "NATInstance",
-                                        "Type"
-                                    ]
+                                    "Ref" : "NATInstanceType"
                                 },
                                 "Arch"
                             ]
@@ -983,11 +1006,7 @@
                     ]
                 },
                 "InstanceType" : {
-                    "Fn::FindInMap" : [
-                        "InstanceTypes",
-                        "NATInstance",
-                        "Type"
-                    ]
+                    "Ref" : "NATInstanceType"
                 },
                 "SubnetId"     : {
                     "Ref" : "PublicSubnet1"
@@ -1023,11 +1042,7 @@
                             "Fn::FindInMap" : [
                                 "AWSInstanceType2Arch",
                                 {
-                                    "Fn::FindInMap" : [
-                                        "InstanceTypes",
-                                        "NATInstance",
-                                        "Type"
-                                    ]
+                                    "Ref" : "NATInstanceType"
                                 },
                                 "Arch"
                             ]
@@ -1035,11 +1050,7 @@
                     ]
                 },
                 "InstanceType" : {
-                    "Fn::FindInMap" : [
-                        "InstanceTypes",
-                        "NATInstance",
-                        "Type"
-                    ]
+                    "Ref" : "NATInstanceType"
                 },
                 "SubnetId"     : {
                     "Ref" : "PublicSubnet2"
@@ -1346,11 +1357,11 @@
                                             " Unrestricted",
                                             " C:\\cfn\\scripts\\CreateUser.ps1 -UserName ",
                                             {
-                                                "Ref" : "ExchangeAdminUser"
+                                                "Ref" : "SQLAdminUser"
                                             },
                                             " -AccountPassword ",
                                             {
-                                                "Ref" : "ExchangeAdminPassword"
+                                                "Ref" : "SQLAdminPassword"
                                             },
                                             " -DomainDNSName ",
                                             {
@@ -1372,87 +1383,6 @@
                                             " C:\\cfn\\scripts\\JoinGroup.ps1 -UserName ",
                                             {
                                                 "Ref" : "DomainAdminUser"
-                                            },
-                                            " -ServerName ",
-                                            {
-                                                "Ref" : "ADServer1NetBIOSName"
-                                            },
-                                            " -DomainDNSName ",
-                                            {
-                                                "Ref" : "DomainDNSName"
-                                            },
-                                            " -GroupName 'Domain Admins'",
-                                            "\n"
-                                        ]
-                                    ]
-                                },
-                                "waitAfterCompletion" : "0"
-                            },
-                            "5-run-JoinGroup"  : {
-                                "command" : {
-                                    "Fn::Join" : [
-                                        "",
-                                        [
-                                            "powershell.exe ",
-                                            "-ExecutionPolicy",
-                                            " Unrestricted",
-                                            " C:\\cfn\\scripts\\JoinGroup.ps1 -UserName ",
-                                            {
-                                                "Ref" : "ExchangeAdminUser"
-                                            },
-                                            " -ServerName ",
-                                            {
-                                                "Ref" : "ADServer1NetBIOSName"
-                                            },
-                                            " -DomainDNSName ",
-                                            {
-                                                "Ref" : "DomainDNSName"
-                                            },
-                                            " -GroupName 'Enterprise Admins'",
-                                            "\n"
-                                        ]
-                                    ]
-                                },
-                                "waitAfterCompletion" : "0"
-                            },
-                            "6-run-JoinGroup"  : {
-                                "command" : {
-                                    "Fn::Join" : [
-                                        "",
-                                        [
-                                            "powershell.exe ",
-                                            "-ExecutionPolicy",
-                                            " Unrestricted",
-                                            " C:\\cfn\\scripts\\JoinGroup.ps1 -UserName ",
-                                            {
-                                                "Ref" : "ExchangeAdminUser"
-                                            },
-                                            " -ServerName ",
-                                            {
-                                                "Ref" : "ADServer1NetBIOSName"
-                                            },
-                                            " -DomainDNSName ",
-                                            {
-                                                "Ref" : "DomainDNSName"
-                                            },
-                                            " -GroupName 'Schema Admins'",
-                                            "\n"
-                                        ]
-                                    ]
-                                },
-                                "waitAfterCompletion" : "0"
-                            },
-                            "7-run-JoinGroup"  : {
-                                "command" : {
-                                    "Fn::Join" : [
-                                        "",
-                                        [
-                                            "powershell.exe ",
-                                            "-ExecutionPolicy",
-                                            " Unrestricted",
-                                            " C:\\cfn\\scripts\\JoinGroup.ps1 -UserName ",
-                                            {
-                                                "Ref" : "ExchangeAdminUser"
                                             },
                                             " -ServerName ",
                                             {
@@ -1514,7 +1444,7 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
                                                     0,
@@ -1525,11 +1455,7 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "DC1",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PrivateSubnet1CIDR"
                                             },
                                             " -replicationsitename ",
                                             "\"Default-First-Site-Name\"",
@@ -1556,7 +1482,7 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
                                                     0,
@@ -1567,15 +1493,11 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "Repl1",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PrivateSubnet2CIDR"
                                             },
                                             " -replicationsitename ",
                                             "\"Default-First-Site-Name\"",
-                                            " -SubnetDescription \"Replication_1_Subnet\"",
+                                            " -SubnetDescription \"DB_1_Subnet\"",
                                             " -SubnetLocation ",
                                             {
                                                 "Fn::Select" : [
@@ -1598,7 +1520,7 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
                                                     0,
@@ -1609,15 +1531,11 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "Mapi1",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PrivateSubnet3CIDR"
                                             },
                                             " -replicationsitename ",
                                             "\"Default-First-Site-Name\"",
-                                            " -SubnetDescription \"MAPI_1_Subnet\"",
+                                            " -SubnetDescription \"AppSVR_1_Subnet\"",
                                             " -SubnetLocation ",
                                             {
                                                 "Fn::Select" : [
@@ -1640,7 +1558,7 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
                                                     0,
@@ -1651,15 +1569,11 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "Client1",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PrivateSubnet4CIDR"
                                             },
                                             " -replicationsitename ",
                                             "\"Default-First-Site-Name\"",
-                                            " -SubnetDescription \"TestClient_1_Subnet\"",
+                                            " -SubnetDescription \"WebSVR_1_Subnet\"",
                                             " -SubnetLocation ",
                                             {
                                                 "Fn::Select" : [
@@ -1682,10 +1596,10 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -1693,11 +1607,7 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "DC2",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PrivateSubnet5CIDR"
                                             },
                                             " -replicationsitename ",
                                             {
@@ -1712,7 +1622,7 @@
                                             " -SubnetLocation ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -1731,10 +1641,10 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -1742,11 +1652,7 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "Repl2",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PrivateSubnet6CIDR"
                                             },
                                             " -replicationsitename ",
                                             {
@@ -1757,11 +1663,11 @@
                                                     }
                                                 ]
                                             },
-                                            " -SubnetDescription \"Replication_2_Subnet\"",
+                                            " -SubnetDescription \"DB_2_Subnet\"",
                                             " -SubnetLocation ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -1780,10 +1686,10 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -1791,11 +1697,7 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "Mapi2",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PrivateSubnet7CIDR"
                                             },
                                             " -replicationsitename ",
                                             {
@@ -1806,11 +1708,11 @@
                                                     }
                                                 ]
                                             },
-                                            " -SubnetDescription \"MAPI_2_Subnet\"",
+                                            " -SubnetDescription \"AppSVR_2_Subnet\"",
                                             " -SubnetLocation ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -1829,10 +1731,10 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -1840,11 +1742,7 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "Client2",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PrivateSubnet8CIDR"
                                             },
                                             " -replicationsitename ",
                                             {
@@ -1855,11 +1753,11 @@
                                                     }
                                                 ]
                                             },
-                                            " -SubnetDescription \"TestClient_2_Subnet\"",
+                                            " -SubnetDescription \"WebSVR_2_Subnet\"",
                                             " -SubnetLocation ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -1878,7 +1776,7 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
                                                     0,
@@ -1889,21 +1787,10 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "Public1",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PublicSubnet1CIDR"
                                             },
                                             " -replicationsitename ",
-                                            {
-                                                "Fn::Select" : [
-                                                    0,
-                                                    {
-                                                        "Fn::GetAZs" : ""
-                                                    }
-                                                ]
-                                            },
+                                            "\"Default-First-Site-Name\"",
                                             " -SubnetDescription \"DMZ1_Subnet\"",
                                             " -SubnetLocation ",
                                             {
@@ -1927,10 +1814,10 @@
                                             "powershell.exe ",
                                             "-ExecutionPolicy",
                                             " Unrestricted",
-                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -newsitename ",
+                                            " c:\\cfn\\scripts\\Create-NewADSite.ps1 -verbose -debug -newsitename ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -1938,11 +1825,7 @@
                                             },
                                             " -subnetCIDR ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "SubnetConfig",
-                                                    "Public2",
-                                                    "CIDR"
-                                                ]
+                                                "Ref" : "PublicSubnet2CIDR"
                                             },
                                             " -replicationsitename ",
                                             {
@@ -1957,7 +1840,7 @@
                                             " -SubnetLocation ",
                                             {
                                                 "Fn::Select" : [
-                                                    0,
+                                                    1,
                                                     {
                                                         "Fn::GetAZs" : ""
                                                     }
@@ -2065,11 +1948,7 @@
                             "Fn::FindInMap" : [
                                 "AWSInstanceType2Arch",
                                 {
-                                    "Fn::FindInMap" : [
-                                        "InstanceTypes",
-                                        "ADServerInstance",
-                                        "Type"
-                                    ]
+                                    "Ref" : "ADServer1InstanceType"
                                 },
                                 "Arch"
                             ]
@@ -2077,11 +1956,7 @@
                     ]
                 },
                 "InstanceType" : {
-                    "Fn::FindInMap" : [
-                        "InstanceTypes",
-                        "ADServerInstance",
-                        "Type"
-                    ]
+                    "Ref" : "ADServer1InstanceType"
                 },
                 "SubnetId"     : {
                     "Ref" : "PrivateSubnet1"
@@ -2096,15 +1971,11 @@
                 ],
                 "SecurityGroupIds" : [
                     {
-                        "Ref" : "SGInternal"
+                        "Ref" : "FirstDomainControllerSG"
                     }
                 ],
                 "PrivateIpAddress" : {
-                    "Fn::FindInMap" : [
-                        "ADPrivateIPs",
-                        "DC1",
-                        "IP"
-                    ]
+                    "Ref" : "ADServer1PrivateIp"
                 },
                 "KeyName"          : {
                     "Ref" : "KeyPairName"
@@ -2292,11 +2163,7 @@
                                             " Unrestricted",
                                             " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "ADPrivateIPs",
-                                                    "DC1",
-                                                    "IP"
-                                                ]
+                                                "Ref" : "ADServer1PrivateIp"
                                             }
                                         ]
                                     ]
@@ -2447,11 +2314,7 @@
                             "Fn::FindInMap" : [
                                 "AWSInstanceType2Arch",
                                 {
-                                    "Fn::FindInMap" : [
-                                        "InstanceTypes",
-                                        "ADServerInstance",
-                                        "Type"
-                                    ]
+                                    "Ref" : "ADServer2InstanceType"
                                 },
                                 "Arch"
                             ]
@@ -2459,11 +2322,7 @@
                     ]
                 },
                 "InstanceType" : {
-                    "Fn::FindInMap" : [
-                        "InstanceTypes",
-                        "ADServerInstance",
-                        "Type"
-                    ]
+                    "Ref" : "ADServer2InstanceType"
                 },
                 "SubnetId"     : {
                     "Ref" : "PrivateSubnet5"
@@ -2478,15 +2337,11 @@
                 ],
                 "SecurityGroupIds" : [
                     {
-                        "Ref" : "SGInternal"
+                        "Ref" : "SecondDomainControllerSG"
                     }
                 ],
                 "PrivateIpAddress" : {
-                    "Fn::FindInMap" : [
-                        "ADPrivateIPs",
-                        "DC2",
-                        "IP"
-                    ]
+                    "Ref" : "ADServer2PrivateIp"
                 },
                 "KeyName"          : {
                     "Ref" : "KeyPairName"
@@ -2668,19 +2523,11 @@
                                             " Unrestricted",
                                             " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "ADPrivateIPs",
-                                                    "DC1",
-                                                    "IP"
-                                                ]
+                                                "Ref" : "ADServer1PrivateIp"
                                             },
                                             " ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "ADPrivateIPs",
-                                                    "DC2",
-                                                    "IP"
-                                                ]
+                                                "Ref" : "ADServer2PrivateIp"
                                             }
                                         ]
                                     ]
@@ -2817,11 +2664,7 @@
                             "Fn::FindInMap" : [
                                 "AWSInstanceType2Arch",
                                 {
-                                    "Fn::FindInMap" : [
-                                        "InstanceTypes",
-                                        "RDGWInstance",
-                                        "Type"
-                                    ]
+                                    "Ref" : "RDGWInstanceType"
                                 },
                                 "Arch"
                             ]
@@ -2829,11 +2672,7 @@
                     ]
                 },
                 "InstanceType" : {
-                    "Fn::FindInMap" : [
-                        "InstanceTypes",
-                        "RDGWInstance",
-                        "Type"
-                    ]
+                    "Ref" : "RDGWInstanceType"
                 },
                 "SubnetId"     : {
                     "Ref" : "PublicSubnet1"
@@ -3024,19 +2863,11 @@
                                             " Unrestricted",
                                             " c:\\cfn\\scripts\\SetDNSOnNIC.ps1 ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "ADPrivateIPs",
-                                                    "DC2",
-                                                    "IP"
-                                                ]
+                                                "Ref" : "ADServer1PrivateIp"
                                             },
                                             " ",
                                             {
-                                                "Fn::FindInMap" : [
-                                                    "ADPrivateIPs",
-                                                    "DC1",
-                                                    "IP"
-                                                ]
+                                                "Ref" : "ADServer2PrivateIp"
                                             }
                                         ]
                                     ]
@@ -3173,11 +3004,7 @@
                             "Fn::FindInMap" : [
                                 "AWSInstanceType2Arch",
                                 {
-                                    "Fn::FindInMap" : [
-                                        "InstanceTypes",
-                                        "RDGWInstance",
-                                        "Type"
-                                    ]
+                                    "Ref" : "RDGWInstanceType"
                                 },
                                 "Arch"
                             ]
@@ -3185,11 +3012,7 @@
                     ]
                 },
                 "InstanceType" : {
-                    "Fn::FindInMap" : [
-                        "InstanceTypes",
-                        "RDGWInstance",
-                        "Type"
-                    ]
+                    "Ref" : "RDGWInstanceType"
                 },
                 "SubnetId"     : {
                     "Ref" : "PublicSubnet2"
@@ -3286,24 +3109,348 @@
         "RDGW2WaitHandle"                     : {
             "Type" : "AWS::CloudFormation::WaitConditionHandle"
         },
-        "SGInternal"                          : {
+        "FirstDomainControllerSG"             : {
             "Type" : "AWS::EC2::SecurityGroup",
             "Properties" : {
-                "GroupDescription" : "VPC Internal Security Group",
+                "GroupDescription" : "Domain Controller",
                 "VpcId"            : {
                     "Ref" : "VPC"
                 },
                 "SecurityGroupIngress" : [
                     {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "123",
+                        "ToPort"     : "123",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "135",
+                        "ToPort"     : "135",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "138",
+                        "ToPort"     : "138",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "464",
+                        "ToPort"     : "464",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "464",
+                        "ToPort"     : "464",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "389",
+                        "ToPort"     : "389",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "389",
+                        "ToPort"     : "389",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "636",
+                        "ToPort"     : "636",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3268",
+                        "ToPort"     : "3268",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3269",
+                        "ToPort"     : "3269",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "88",
+                        "ToPort"     : "88",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "88",
+                        "ToPort"     : "88",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "67",
+                        "ToPort"     : "67",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "2535",
+                        "ToPort"     : "2535",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "DomainMemberSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "123",
+                        "ToPort"     : "123",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "135",
+                        "ToPort"     : "135",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "138",
+                        "ToPort"     : "138",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "464",
+                        "ToPort"     : "464",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "464",
+                        "ToPort"     : "464",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "389",
+                        "ToPort"     : "389",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "389",
+                        "ToPort"     : "389",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "636",
+                        "ToPort"     : "636",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3268",
+                        "ToPort"     : "3268",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3269",
+                        "ToPort"     : "3269",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "88",
+                        "ToPort"     : "88",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "88",
+                        "ToPort"     : "88",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "67",
+                        "ToPort"     : "67",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "2535",
+                        "ToPort"     : "2535",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
                         "IpProtocol" : "tcp",
                         "FromPort"   : "3389",
                         "ToPort"     : "3389",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Public1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PublicSubnet1CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3389",
+                        "ToPort"     : "3389",
+                        "CidrIp"     : {
+                            "Ref" : "PublicSubnet2CIDR"
                         }
                     },
                     {
@@ -3311,23 +3458,7 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Public1",
-                                "CIDR"
-                            ]
-                        }
-                    },
-                    {
-                        "IpProtocol" : "tcp",
-                        "FromPort"   : "3389",
-                        "ToPort"     : "3389",
-                        "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Public2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PublicSubnet1CIDR"
                         }
                     },
                     {
@@ -3335,11 +3466,178 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Public2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PublicSubnet2CIDR"
+                        }
+                    }
+                ]
+            }
+        },
+        "SecondDomainControllerSG"            : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "Domain Controller 2",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "123",
+                        "ToPort"     : "123",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "135",
+                        "ToPort"     : "135",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "138",
+                        "ToPort"     : "138",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "464",
+                        "ToPort"     : "464",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "464",
+                        "ToPort"     : "464",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "389",
+                        "ToPort"     : "389",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "389",
+                        "ToPort"     : "389",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "636",
+                        "ToPort"     : "636",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3268",
+                        "ToPort"     : "3268",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3269",
+                        "ToPort"     : "3269",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "53",
+                        "ToPort"     : "53",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "88",
+                        "ToPort"     : "88",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "88",
+                        "ToPort"     : "88",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "67",
+                        "ToPort"     : "67",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "2535",
+                        "ToPort"     : "2535",
+                        "SourceSecurityGroupId" : {
+                            "Ref" : "FirstDomainControllerSG"
                         }
                     },
                     {
@@ -3501,64 +3799,40 @@
                         "SourceSecurityGroupId" : {
                             "Ref" : "DomainMemberSG"
                         }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3389",
+                        "ToPort"     : "3389",
+                        "CidrIp"     : {
+                            "Ref" : "PublicSubnet1CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3389",
+                        "ToPort"     : "3389",
+                        "CidrIp"     : {
+                            "Ref" : "PublicSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Ref" : "PublicSubnet1CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Ref" : "PublicSubnet2CIDR"
+                        }
                     }
                 ]
-            }
-        },
-        "SGInternalIngressTCP1"               : {
-            "Type" : "AWS::EC2::SecurityGroupIngress",
-            "Properties" : {
-                "GroupId" : {
-                    "Ref" : "SGInternal"
-                },
-                "IpProtocol" : "tcp",
-                "FromPort"   : "1",
-                "ToPort"     : "3388",
-                "SourceSecurityGroupId" : {
-                    "Ref" : "SGInternal"
-                }
-            }
-        },
-        "SGInternalIngressTCP2"               : {
-            "Type" : "AWS::EC2::SecurityGroupIngress",
-            "Properties" : {
-                "GroupId" : {
-                    "Ref" : "SGInternal"
-                },
-                "IpProtocol" : "tcp",
-                "FromPort"   : "3390",
-                "ToPort"     : "65535",
-                "SourceSecurityGroupId" : {
-                    "Ref" : "SGInternal"
-                }
-            }
-        },
-        "SGInternalIngressUDP"                : {
-            "Type" : "AWS::EC2::SecurityGroupIngress",
-            "Properties" : {
-                "GroupId" : {
-                    "Ref" : "SGInternal"
-                },
-                "IpProtocol" : "udp",
-                "FromPort"   : "1",
-                "ToPort"     : "65535",
-                "SourceSecurityGroupId" : {
-                    "Ref" : "SGInternal"
-                }
-            }
-        },
-        "SGInternalIngressICMP"               : {
-            "Type" : "AWS::EC2::SecurityGroupIngress",
-            "Properties" : {
-                "GroupId" : {
-                    "Ref" : "SGInternal"
-                },
-                "IpProtocol" : "icmp",
-                "FromPort"   : "-1",
-                "ToPort"     : "-1",
-                "SourceSecurityGroupId" : {
-                    "Ref" : "SGInternal"
-                }
             }
         },
         "DomainMemberSG"                      : {
@@ -3574,11 +3848,7 @@
                         "FromPort"   : "53",
                         "ToPort"     : "53",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet1CIDR"
                         }
                     },
                     {
@@ -3586,11 +3856,7 @@
                         "FromPort"   : "53",
                         "ToPort"     : "53",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet1CIDR"
                         }
                     },
                     {
@@ -3598,11 +3864,7 @@
                         "FromPort"   : "49152",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet1CIDR"
                         }
                     },
                     {
@@ -3610,11 +3872,7 @@
                         "FromPort"   : "49152",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet1CIDR"
                         }
                     },
                     {
@@ -3622,11 +3880,7 @@
                         "FromPort"   : "53",
                         "ToPort"     : "53",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet5CIDR"
                         }
                     },
                     {
@@ -3634,11 +3888,7 @@
                         "FromPort"   : "53",
                         "ToPort"     : "53",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet5CIDR"
                         }
                     },
                     {
@@ -3646,11 +3896,7 @@
                         "FromPort"   : "49152",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet5CIDR"
                         }
                     },
                     {
@@ -3658,11 +3904,23 @@
                         "FromPort"   : "49152",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet5CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3389",
+                        "ToPort"     : "3389",
+                        "CidrIp"     : {
+                            "Ref" : "PublicSubnet1CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3389",
+                        "ToPort"     : "3389",
+                        "CidrIp"     : {
+                            "Ref" : "PublicSubnet2CIDR"
                         }
                     }
                 ]
@@ -3693,11 +3951,7 @@
                         "FromPort"   : "1",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet1CIDR"
                         }
                     },
                     {
@@ -3705,11 +3959,7 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet1CIDR"
                         }
                     },
                     {
@@ -3717,11 +3967,7 @@
                         "FromPort"   : "1",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Repl1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet2CIDR"
                         }
                     },
                     {
@@ -3729,11 +3975,7 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Repl1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet2CIDR"
                         }
                     },
                     {
@@ -3741,11 +3983,7 @@
                         "FromPort"   : "1",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Mapi1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet3CIDR"
                         }
                     },
                     {
@@ -3753,11 +3991,7 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Mapi1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet3CIDR"
                         }
                     },
                     {
@@ -3765,11 +3999,7 @@
                         "FromPort"   : "1",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Client1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet4CIDR"
                         }
                     },
                     {
@@ -3777,11 +4007,7 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Client1",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet4CIDR"
                         }
                     }
                 ]
@@ -3790,7 +4016,7 @@
         "NAT2SecurityGroup"                   : {
             "Type" : "AWS::EC2::SecurityGroup",
             "Properties" : {
-                "GroupDescription" : "Enables SSH access to NAT1 in AZ1 via port 22",
+                "GroupDescription" : "Enables SSH access to NAT2 in AZ2 via port 22",
                 "VpcId"            : {
                     "Ref" : "VPC"
                 },
@@ -3812,11 +4038,7 @@
                         "FromPort"   : "1",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet5CIDR"
                         }
                     },
                     {
@@ -3824,11 +4046,7 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "DC2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet5CIDR"
                         }
                     },
                     {
@@ -3836,11 +4054,7 @@
                         "FromPort"   : "1",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Repl2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet6CIDR"
                         }
                     },
                     {
@@ -3848,11 +4062,7 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Repl2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet6CIDR"
                         }
                     },
                     {
@@ -3860,11 +4070,7 @@
                         "FromPort"   : "1",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Mapi2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet7CIDR"
                         }
                     },
                     {
@@ -3872,11 +4078,7 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Mapi2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet7CIDR"
                         }
                     },
                     {
@@ -3884,11 +4086,7 @@
                         "FromPort"   : "1",
                         "ToPort"     : "65535",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Client2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet8CIDR"
                         }
                     },
                     {
@@ -3896,11 +4094,7 @@
                         "FromPort"   : "-1",
                         "ToPort"     : "-1",
                         "CidrIp"     : {
-                            "Fn::FindInMap" : [
-                                "SubnetConfig",
-                                "Client2",
-                                "CIDR"
-                            ]
+                            "Ref" : "PrivateSubnet8CIDR"
                         }
                     }
                 ]
@@ -3919,6 +4113,231 @@
                         "FromPort"   : "3389",
                         "ToPort"     : "3389",
                         "CidrIp"     : "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : "0.0.0.0/0"
+                    }
+                ]
+            }
+        },
+        "WSFCSecurityGroup"                   : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "Enable the WSFC and SQL AlwaysOn Availability Group communications",
+                "VpcId"            : {
+                    "Ref" : "VPC"
+                },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "icmp",
+                        "FromPort"   : "-1",
+                        "ToPort"     : "-1",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "135",
+                        "ToPort"     : "135",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "135",
+                        "ToPort"     : "135",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "137",
+                        "ToPort"     : "137",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "137",
+                        "ToPort"     : "137",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "445",
+                        "ToPort"     : "445",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "1433",
+                        "ToPort"     : "1433",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "1433",
+                        "ToPort"     : "1433",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3343",
+                        "ToPort"     : "3343",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "3343",
+                        "ToPort"     : "3343",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "5022",
+                        "ToPort"     : "5022",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "5022",
+                        "ToPort"     : "5022",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "137",
+                        "ToPort"     : "137",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "137",
+                        "ToPort"     : "137",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "3343",
+                        "ToPort"     : "3343",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "3343",
+                        "ToPort"     : "3343",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet2CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "udp",
+                        "FromPort"   : "49152",
+                        "ToPort"     : "65535",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet6CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "1433",
+                        "ToPort"     : "1434",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet3CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "1433",
+                        "ToPort"     : "1434",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet4CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "1433",
+                        "ToPort"     : "1434",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet7CIDR"
+                        }
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort"   : "1433",
+                        "ToPort"     : "1434",
+                        "CidrIp"     : {
+                            "Ref" : "PrivateSubnet8CIDR"
+                        }
                     }
                 ]
             }
@@ -3937,61 +4356,22 @@
             },
             "Description" : "Elastic IP address of the second Remote Desktop Gateway (RDGW2) in AZ2"
         },
-        "AD1PrivateIP"   : {
+        "DomainAdmin"    : {
             "Value" : {
-                "Fn::FindInMap" : [
-                    "ADPrivateIPs",
-                    "DC1",
-                    "IP"
+                "Fn::Join" : [
+                    "",
+                    [
+                        {
+                            "Ref" : "DomainNetBIOSName"
+                        },
+                        "\\",
+                        {
+                            "Ref" : "DomainAdminUser"
+                        }
+                    ]
                 ]
             },
-            "Description" : "Private IP address of the first Domain Controller (DC1) in AZ1"
-        },
-        "AD2PrivateIP"   : {
-            "Value" : {
-                "Fn::FindInMap" : [
-                    "ADPrivateIPs",
-                    "DC2",
-                    "IP"
-                ]
-            },
-            "Description" : "Private IP address of the second Domain Controller (DC2) in AZ2"
-        },
-        "SGInternalID"   : {
-            "Value" : {
-                "Ref" : "SGInternal"
-            },
-            "Description" : "ID of the VPC internal Security Group"
-        },
-        "VPCID"          : {
-            "Value" : {
-                "Ref" : "VPC"
-            },
-            "Description" : "ID of the VPC"
-        },
-        "MB1ServerSubnetID" : {
-            "Value" : {
-                "Ref" : "PrivateSubnet3"
-            },
-            "Description" : "ID of the MAPI Subnet 1"
-        },
-        "MB2ServerSubnetID" : {
-            "Value" : {
-                "Ref" : "PrivateSubnet7"
-            },
-            "Description" : "ID of the MAPI Subnet 2"
-        },
-        "ReplicationSubnet1ID" : {
-            "Value" : {
-                "Ref" : "PrivateSubnet2"
-            },
-            "Description" : "ID of the Replication Subnet 1"
-        },
-        "ReplicationSubnet2ID" : {
-            "Value" : {
-                "Ref" : "PrivateSubnet6"
-            },
-            "Description" : "ID of the Replication Subnet 2"
+            "Description" : "Domain administrator account"
         }
     }
 }
