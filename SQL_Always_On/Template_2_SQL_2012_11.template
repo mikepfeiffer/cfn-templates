@@ -1,0 +1,2094 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Description"              : "**Version 1.0** STEP-2 This template creates and installs 2 Windows Server 2012 based WSFC cluster nodes into seperate subnet inside a VPC. It attached two additional PIOPS striped volume sets, Volume D and E, to hold the databases and the Log files. Default Domain Administrator password will be the one retrieved from the instance. **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you create a stack from this template.",
+    "Parameters"               : {
+        "KeyPairName" : {
+            "Description" : "Public/private key pairs allow you to securely connect to your instance after it launches",
+            "Type"        : "String"
+        },
+        "WSFCNode1InstanceType" : {
+            "Description" : "Amazon EC2 instance type for the 1st WSFC Node",
+            "Type"        : "String",
+            "Default"     : "m2.4xlarge",
+            "AllowedValues" : [
+                "m1.large",
+                "m1.xlarge",
+                "m2.4xlarge"
+            ],
+            "ConstraintDescription" : "Only EBS Optimized instance types m1.large, m1.xlarge, m2.4xlarge allowed"
+        },
+        "WSFCNode2InstanceType" : {
+            "Description" : "Amazon EC2 instance type for the 2nd WSFC Node",
+            "Type"        : "String",
+            "Default"     : "m2.4xlarge",
+            "AllowedValues" : [
+                "m1.large",
+                "m1.xlarge",
+                "m2.4xlarge"
+            ],
+            "ConstraintDescription" : "Only EBS Optimized instance types m1.large, m1.xlarge, m2.4xlarge allowed"
+        },
+        "DomainDNSName"         : {
+            "Description" : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.com",
+            "Type"        : "String",
+            "Default"     : "contoso.com",
+            "MinLength"   : "3",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]+\\..+"
+        },
+        "DomainNetBIOSName"     : {
+            "Description" : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. CORP",
+            "Type"        : "String",
+            "Default"     : "contoso",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "WSFCNode1NetBIOSName"  : {
+            "Description" : "NetBIOS name of the 1st WSFC Node (up to 15 characters)",
+            "Type"        : "String",
+            "Default"     : "WSFCNode1",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "WSFCNode2NetBIOSName"  : {
+            "Description" : "NetBIOS name of the 2nd WSFC Node (up to 15 characters)",
+            "Type"        : "String",
+            "Default"     : "WSFCNode2",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "ADServerNetBIOSName1" : {
+            "Description" : "NetBIOS name of the 1st AD Server (upto 15 characters)",
+            "Type"        : "String",
+            "Default"     : "DC1",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "ADServerNetBIOSName2" : {
+            "Description" : "NetBIOS name of the 2nd AD Server (upto 15 characters)",
+            "Type"        : "String",
+            "Default"     : "DC2",
+            "MinLength"   : "1",
+            "MaxLength"   : "15",
+            "AllowedPattern" : "[a-zA-Z0-9]+"
+        },
+        "DomainAdminUser"       : {
+            "Description" : "User name for the account that will be added as Domain Administrator. This is separate from the default \"Administrator\" account",
+            "Type"        : "String",
+            "Default"     : "StackAdmin",
+            "MinLength"   : "5",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]*"
+        },
+        "DomainAdminPassword"   : {
+            "Description" : "Password for the domain admin user. Must be at least 8 characters containing letters, numbers and symbols",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "true",
+            "Default"        : "Password123"
+        },
+        "SQLServiceAccount"     : {
+            "Description" : "User name for the SQL Server Service Account. This Account is a Domain User.",
+            "Type"        : "String",
+            "Default"     : "sqlsa",
+            "MinLength"   : "5",
+            "MaxLength"   : "25",
+            "AllowedPattern" : "[a-zA-Z0-9]*"
+        },
+        "SQLServiceAccountPassword" : {
+            "Description" : "Password for the SQL Service account. Must be at least 8 characters containing letters, numbers and symbols",
+            "Type"        : "String",
+            "MinLength"   : "8",
+            "MaxLength"   : "32",
+            "AllowedPattern" : "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+            "NoEcho"         : "true",
+            "Default"        : "Password123"
+        },
+        "ADServer1PrivateIp"        : {
+            "Description" : "Fixed private IP for the first Active Directory server located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.2.10"
+        },
+        "ADServer2PrivateIp"        : {
+            "Description" : "Fixed private IP for the second Active Directory serverr located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.3.10"
+        },
+        "WSFCNode1PrivateIp"        : {
+            "Description" : "Fixed private IP for the 1st WSFC Node located in AZ1",
+            "Type"        : "String",
+            "Default"     : "10.0.8.100"
+        },
+        "WSFCNode2PrivateIp"        : {
+            "Description" : "Fixed private IP for the 2nd WSFC Node located in AZ2",
+            "Type"        : "String",
+            "Default"     : "10.0.9.100"
+        },
+        "DomainMemberSGID"          : {
+            "Description" : "ID of the Domain Member Security Group (e.g., sg-7f16e910)",
+            "Type"        : "String"
+        },
+        "WSFCServerSecurityGroupID" : {
+            "Description" : "ID of the WSFC and AlwaysOn AG Security Group (e.g., sg-d215eabd)",
+            "Type"        : "String"
+        },
+        "VPC"                       : {
+            "Description" : "ID of the VPC (e.g., vpc-0343606e)",
+            "Type"        : "String"
+        },
+        "WSFCNode1Subnet"           : {
+            "Description" : "ID of the subnet you want to provision the first WSFC node into (e.g., subnet-a0246dcd)",
+            "Type"        : "String"
+        },
+        "WSFCNode2Subnet"           : {
+            "Description" : "ID of the subnet you want to provision the second WSFC node into (e.g., subnet-e3246d8e)",
+            "Type"        : "String"
+        },
+        "DiskProvisionedIOPS"       : {
+            "Description" : "PIOPS of the provisioned disks. This templates provisions a total of 6 disks per WSFC Node",
+            "Type"        : "String",
+            "Default"     : "500"
+        }
+    },
+    "Mappings"                 : {
+        "AWSInstanceType2Arch" : {
+            "m1.small" : {
+                "Arch" : "64"
+            },
+            "m1.medium" : {
+                "Arch" : "64"
+            },
+            "m1.large"  : {
+                "Arch" : "64"
+            },
+            "m1.xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.2xlarge" : {
+                "Arch" : "64"
+            },
+            "m2.4xlarge" : {
+                "Arch" : "64"
+            },
+            "c1.medium"  : {
+                "Arch" : "64"
+            },
+            "c1.xlarge"  : {
+                "Arch" : "64"
+            }
+        },
+        "AWSRegionArch2AMI"    : {
+            "us-east-1" : {
+                "64" : "ami-814642e8"
+            },
+            "eu-west-1" : {
+                "64" : "ami-4eb74739"
+            },
+            "ap-northeast-1" : {
+                "64" : "ami-7d681d7c"
+            },
+            "us-west-1"      : {
+                "64" : "ami-2a80bd6f"
+            },
+            "us-west-2"      : {
+                "64" : "ami-bc92f08c"
+            },
+            "ap-southeast-1" : {
+                "64" : "ami-9ef4a2cc"
+            },
+            "ap-southeast-2" : {
+                "64" : "ami-2b23bd11"
+            },
+            "sa-east-1"      : {
+                "64" : "ami-85f55698"
+            }
+        }
+    },
+    "Resources"                : {
+        "WSFCNode1WaitCondition" : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "WSFCNode2",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "WSFCNode1WaitHandle"
+                },
+                "Timeout" : "5400"
+            }
+        },
+        "WSFCNode1WaitHandle"    : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "WSFCNode2WaitCondition" : {
+            "Type" : "AWS::CloudFormation::WaitCondition",
+            "DependsOn" : "WSFCNode2",
+            "Properties" : {
+                "Handle" : {
+                    "Ref" : "WSFCNode2WaitHandle"
+                },
+                "Timeout" : "5400"
+            }
+        },
+        "WSFCNode2WaitHandle"    : {
+            "Type" : "AWS::CloudFormation::WaitConditionHandle"
+        },
+        "WSFCNode1"              : {
+            "Type" : "AWS::EC2::Instance",
+            "Metadata" : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "createraid",
+                            "rename",
+							"join",
+							"createSqlAccount",
+							"installsql",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.WSFCNode1.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r WSFCNode1",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "createraid" : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\StripeDisk1.txt" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "select disk=1 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=3 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=4 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=5 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=6 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=7 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=8 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=3 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=4 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=5 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=6 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume stripe disk=3,4,5,6 ",
+                                            "\n",
+                                            "select volume=2 ",
+                                            "\n",
+                                            "assign letter=D ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"DATA Volume\"",
+                                            "\n",
+                                            "exit",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk1.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "diskpart /s C:\\cfn\\scripts\\StripeDisk1.txt",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk2.txt" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "select disk=7 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=8 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume stripe disk=7,8 ",
+                                            "\n",
+                                            "select volume=3 ",
+                                            "\n",
+                                            "assign letter=E ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"LOG Volume\"",
+                                            "\n",
+                                            "select disk=1 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=1 ",
+                                            "\n",
+                                            "select volume=4 ",
+                                            "\n",
+                                            "assign letter=F ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"TEMP Volume\"",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=2 ",
+                                            "\n",
+                                            "select volume=5 ",
+                                            "\n",
+                                            "assign letter=G ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"PAGE Volume\"",
+                                            "\n",
+                                            "exit",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk2.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "diskpart /s C:\\cfn\\scripts\\StripeDisk2.txt",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-perform-StripeDisk1" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\scripts\\StripeDisk1.bat"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-perform-StripeDisk2" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\scripts\\StripeDisk2.bat"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe -ExecutionPolicy Unrestricted Rename-Computer -NewName ",
+											{
+                                                "Ref" : "WSFCNode1NetBIOSName"
+                                            },
+											" -Restart"
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "commands" : {
+                            "1-set-dns-servers" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe -ExecutionPolicy Unrestricted ",
+                                            "\"",
+                                            "Get-NetAdapter | Set-DnsClientServerAddress -ServerAddresses ",
+                                            {
+                                                "Ref" : "ADServer1PrivateIp"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "5"
+                            },
+                            "2-join-domain"     : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted -Command \"",
+                                            "Add-Computer -DomainName ",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " -Credential ",
+                                            "(New-Object System.Management.Automation.PSCredential('",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "',",
+                                            "(ConvertTo-SecureString ",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " -AsPlainText -Force))) ",
+                                            "-Restart\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "createSqlAccount" : {
+                        "commands" : {
+                            "1-create-sqlacct" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe -ExecutionPolicy Unrestricted -Command ",
+                                            "\"Invoke-Command -Scriptblock{ New-ADUser ",
+                                            "-Name ",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            " ",
+                                            "-UserPrincipalName ",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            "@",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " ",
+                                            "-AccountPassword (ConvertTo-SecureString ",
+                                            {
+                                                "Ref" : "SQLServiceAccountPassword"
+                                            },
+                                            " -AsPlainText -Force) ",
+                                            "-Enabled $true ",
+                                            "-PasswordNeverExpires $true } -ComputerName ",
+                                            {
+                                                "Ref" : "ADServerNetBIOSName1"
+                                            },
+                                            " -Credential ",
+                                            "(New-Object System.Management.Automation.PSCredential('",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "',",
+                                            "(ConvertTo-SecureString ",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " -AsPlainText -Force))) ",																						
+											"\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "installsql"      : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\WSFC.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "Add-WindowsFeature failover-clustering -IncludeManagementTools",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\ScriptDownloadSQLEE.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/DownloadSQLEE.ps1 -Destination c:\\cfn\\scripts\\DownloadSQLEE.ps1",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"   : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/OpenWSFCPorts.bat -Destination C:\\cfn\\scripts\\OpenWSFCPorts.bat",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\AddUserToGroup.ps1"      : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "Param(",
+                                            "\n",
+                                            "[Parameter(Mandatory=$True)]",
+                                            "\n",
+                                            "[string]$ServerName,",
+                                            "\n",
+                                            "[Parameter(Mandatory=$True)]",
+                                            "\n",
+                                            "[string]$GroupName,",
+                                            "\n",
+                                            "[Parameter(Mandatory=$True)]",
+                                            "\n",
+                                            "[string]$DomainNetBIOSName,",
+                                            "\n",
+                                            "[Parameter(Mandatory=$True)]",
+                                            "\n",
+                                            "[string]$UserName",
+                                            "\n",
+                                            ")",
+                                            "$de = [ADSI]\"WinNT://$ServerName/$GroupName,group\"",
+                                            "\n",
+                                            "$de.psbase.Invoke(\"Add\",([ADSI]\"WinNT://$DomainNetBIOSName/$UserName\").path)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\Users\\Default\\Desktop\\InstallSQLEE.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\MicrosoftDownloads\\x64\\SQLFULL_x64_ENU\\SETUP.EXE ",
+                                            "/QS ",
+                                            "/Action=Install ",
+                                            "/Features=SQLEngine,Replication,FullText,BIDS,Conn,BOL,ADV_SSMS ",
+                                            "/INSTANCENAME=MSSQLSERVER ",
+                                            "/SQLSVCACCOUNT=\"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            "\" ",
+                                            "/SQLSVCPASSWORD=\"",
+                                            {
+                                                "Ref" : "SQLServiceAccountPassword"
+                                            },
+                                            "\" ",
+                                            "/AGTSVCACCOUNT=\"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            "\" ",
+                                            "/AGTSVCPASSWORD=\"",
+                                            {
+                                                "Ref" : "SQLServiceAccountPassword"
+                                            },
+                                            "\" ",
+                                            "/SQLSYSADMINACCOUNTS=\"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" ",
+                                            "/SQLUSERDBDIR=\"D:\\MSSQL\\DATA\" ",
+                                            "/SQLUSERDBLOGDIR=\"E:\\MSSQL\\LOG\" ",
+                                            "/SQLBACKUPDIR=\"D:\\MSSQL\\Backup\" ",
+                                            "/SQLTEMPDBDIR=\"F:\\MSSQL\\TempDB\" ",
+                                            "/SQLTEMPDBLOGDIR=\"F:\\MSSQL\\TempDB\" ",
+                                            "/IACCEPTSQLSERVERLICENSETERMS"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "a-execute-powershell-script-WSFC" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\WSFC.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "b-execute-powershell-script-DownloadSQLEE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\ScriptDownloadSQLEE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "c-execute-powershell-DownloadSQLEE"        : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadSQLEE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "d-execute-powershell-DownloadWSFCPorts"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "e-open-WSFC-ports"                         : {
+                                "command" : "C:\\cfn\\scripts\\OpenWSFCPorts.bat"
+                            },
+                            "f-execute-powershell-script-AddUserToGroup" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\AddUserToGroup.ps1 -UserName ",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " -ServerName ",
+                                            {
+                                                "Ref" : "WSFCNode1NetBIOSName"
+                                            },
+                                            " -DomainNetBIOSName ",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            " -GroupName \"Administrators\"",
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "g-execute-powershell-script-AddUserToGroup" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\AddUserToGroup.ps1 -UserName ",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            " -ServerName ",
+                                            {
+                                                "Ref" : "WSFCNode1NetBIOSName"
+                                            },
+                                            " -DomainNetBIOSName ",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            " -GroupName \"Administrators\"",
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+							"h-enable-autologon" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
+									"\"New-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name AutoAdminLogon -Value 1 | out-null",
+									";",
+									"New-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name DefaultUserName -Value ", { "Ref" : "DomainAdminUser" }, "@", { "Ref" : "DomainDNSName" }, " | out-null",
+									";",
+									"New-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name DefaultPassword -Value ", { "Ref" : "DomainAdminPassword" }, " | out-null",
+									"\""
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"i-set-startup-script" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
+									"\"New-ItemProperty -Path HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce -Name InstallSQL -Value C:\\Users\\Default\\Desktop\\InstallSQLEE.bat | out-null",
+									"\""
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"j-reboot" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
+									"Restart-Computer -Force"
+								]]},
+								"waitAfterCompletion" : "forever"
+							},
+                            "k-force-ad-replication" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe -ExecutionPolicy Unrestricted -Command ",
+                                            "\"Invoke-Command -Scriptblock{ repadmin /syncall /A /e /P } -ComputerName ",
+                                            {
+                                                "Ref" : "ADServerNetBIOSName1"
+                                            },
+                                            " -Credential ",
+                                            "(New-Object System.Management.Automation.PSCredential('",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "',",
+                                            "(ConvertTo-SecureString ",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " -AsPlainText -Force))) ",																						
+											"\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+							"l-wait-for-install" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
+									"Start-Sleep 30"
+								]]},
+								"waitAfterCompletion" : "0"
+							}
+                        }
+                    },
+                    "finalize"      : {
+                        "commands" : {
+                            "1-signal-success"                           : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "WSFCNode1WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Ref" : "WSFCNode1InstanceType"
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Ref" : "WSFCNode1InstanceType"
+                },
+                "SubnetId"     : {
+                    "Ref" : "WSFCNode1Subnet"
+                },
+                "EbsOptimized" : "true",
+                "PrivateIpAddress" : {
+                    "Ref" : "WSFCNode1PrivateIp"
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "WSFCNode1NetBIOSName"
+                        }
+                    }
+                ],
+                "BlockDeviceMappings" : [
+                    {
+                        "DeviceName" : "/dev/sda1",
+                        "Ebs"        : {
+                            "VolumeSize" : "100"
+                        }
+                    },
+                    {
+                        "DeviceName" : "/dev/xvdb",
+                        "VirtualName" : "ephemeral0"
+                    },
+                    {
+                        "DeviceName" : "/dev/xvdc",
+                        "VirtualName" : "ephemeral1"
+                    }
+                ],
+                "Volumes"             : [
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode1Volume1"
+                        },
+                        "Device"   : "/dev/xvdf"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode1Volume2"
+                        },
+                        "Device"   : "/dev/xvdg"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode1Volume3"
+                        },
+                        "Device"   : "/dev/xvdh"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode1Volume4"
+                        },
+                        "Device"   : "/dev/xvdi"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode1Volume5"
+                        },
+                        "Device"   : "/dev/xvdj"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode1Volume6"
+                        },
+                        "Device"   : "/dev/xvdk"
+                    }
+                ],
+                "SecurityGroupIds"    : [
+                    {
+                        "Ref" : "DomainMemberSGID"
+                    },
+                    {
+                        "Ref" : "WSFCServerSecurityGroupID"
+                    }
+                ],
+                "KeyName"             : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"            : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r WSFCNode1 ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "WSFCNode2"              : {
+            "Type" : "AWS::EC2::Instance",
+            "DependsOn" : "WSFCNode1",
+            "Metadata"  : {
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "config" : [
+                            "CFNsetup",
+                            "createraid",
+                            "rename",
+							"join",
+							"installsql",
+                            "finalize"
+                        ]
+                    },
+                    "CFNsetup"   : {
+                        "files" : {
+                            "c:\\cfn\\cfn-hup.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.WSFCNode2.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=cfn-init.exe -v -s ",
+                                            {
+                                                "Ref" : "AWS::StackId"
+                                            },
+                                            " -r WSFCNode2",
+                                            " --region ",
+                                            {
+                                                "Ref" : "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services" : {
+                            "windows" : {
+                                "cfn-hup" : {
+                                    "enabled" : "true",
+                                    "ensureRunning" : "true",
+                                    "files"         : [
+                                        "c:\\cfn\\cfn-hup.conf",
+                                        "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "createraid" : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\StripeDisk1.txt" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "select disk=1 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=3 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=4 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=5 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=6 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=7 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=8 ",
+                                            "\n",
+                                            "select partition 1 ",
+                                            "\n",
+                                            "delete partition ",
+                                            "\n",
+                                            "select disk=3 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=4 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=5 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=6 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume stripe disk=3,4,5,6 ",
+                                            "\n",
+                                            "select volume=2 ",
+                                            "\n",
+                                            "assign letter=D ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"DATA Volume\"",
+                                            "\n",
+                                            "exit",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk1.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "diskpart /s C:\\cfn\\scripts\\StripeDisk1.txt",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk2.txt" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "select disk=7 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "select disk=8 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume stripe disk=7,8 ",
+                                            "\n",
+                                            "select volume=3 ",
+                                            "\n",
+                                            "assign letter=E ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"LOG Volume\"",
+                                            "\n",
+                                            "select disk=1 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=1 ",
+                                            "\n",
+                                            "select volume=4 ",
+                                            "\n",
+                                            "assign letter=F ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"TEMP Volume\"",
+                                            "\n",
+                                            "select disk=2 ",
+                                            "\n",
+                                            "convert dynamic ",
+                                            "\n",
+                                            "create volume simple disk=2 ",
+                                            "\n",
+                                            "select volume=5 ",
+                                            "\n",
+                                            "assign letter=G ",
+                                            "\n",
+                                            "format fs=ntfs quick label=\"PAGE Volume\"",
+                                            "\n",
+                                            "exit",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\StripeDisk2.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "diskpart /s C:\\cfn\\scripts\\StripeDisk2.txt",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "1-perform-StripeDisk1" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\scripts\\StripeDisk1.bat"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "2-perform-StripeDisk2" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\cfn\\scripts\\StripeDisk2.bat"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "rename"     : {
+                        "commands" : {
+                            "1-execute-powershell-script-RenameComputer" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe -ExecutionPolicy Unrestricted Rename-Computer -NewName ",
+											{
+                                                "Ref" : "WSFCNode2NetBIOSName"
+                                            },
+											" -Restart"
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "join"       : {
+                        "commands" : {
+                            "1-set-dns-servers" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe -ExecutionPolicy Unrestricted ",
+                                            "\"",
+                                            "Get-NetAdapter | Set-DnsClientServerAddress -ServerAddresses ",
+                                            {
+                                                "Ref" : "ADServer1PrivateIp"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "5"
+                            },
+                            "2-join-domain"     : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted -Command \"",
+                                            "Add-Computer -DomainName ",
+                                            {
+                                                "Ref" : "DomainDNSName"
+                                            },
+                                            " -Credential ",
+                                            "(New-Object System.Management.Automation.PSCredential('",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "',",
+                                            "(ConvertTo-SecureString ",
+                                            {
+                                                "Ref" : "DomainAdminPassword"
+                                            },
+                                            " -AsPlainText -Force))) ",
+                                            "-Restart\""
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            }
+                        }
+                    },
+                    "installsql"      : {
+                        "files" : {
+                            "C:\\cfn\\scripts\\WSFC.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module servermanager",
+                                            "\n",
+                                            "Add-WindowsFeature failover-clustering -IncludeManagementTools",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\ScriptDownloadSQLEE.ps1" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/DownloadSQLEE.ps1 -Destination c:\\cfn\\scripts\\DownloadSQLEE.ps1",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"   : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "import-module BitsTransfer ",
+                                            "\n",
+                                            "Start-BitsTransfer ",
+                                            "-Source https://s3.amazonaws.com/CFN_Templates/OpenWSFCPorts.bat -Destination C:\\cfn\\scripts\\OpenWSFCPorts.bat",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\cfn\\scripts\\AddUserToGroup.ps1"      : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "Param(",
+                                            "\n",
+                                            "[Parameter(Mandatory=$True)]",
+                                            "\n",
+                                            "[string]$ServerName,",
+                                            "\n",
+                                            "[Parameter(Mandatory=$True)]",
+                                            "\n",
+                                            "[string]$GroupName,",
+                                            "\n",
+                                            "[Parameter(Mandatory=$True)]",
+                                            "\n",
+                                            "[string]$DomainNetBIOSName,",
+                                            "\n",
+                                            "[Parameter(Mandatory=$True)]",
+                                            "\n",
+                                            "[string]$UserName",
+                                            "\n",
+                                            ")",
+                                            "$de = [ADSI]\"WinNT://$ServerName/$GroupName,group\"",
+                                            "\n",
+                                            "$de.psbase.Invoke(\"Add\",([ADSI]\"WinNT://$DomainNetBIOSName/$UserName\").path)",
+                                            "\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "C:\\Users\\Default\\Desktop\\InstallSQLEE.bat" : {
+                                "content" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "C:\\MicrosoftDownloads\\x64\\SQLFULL_x64_ENU\\SETUP.EXE ",
+                                            "/QS ",
+                                            "/Action=Install ",
+                                            "/Features=SQLEngine,Replication,FullText,BIDS,Conn,BOL,ADV_SSMS ",
+                                            "/INSTANCENAME=MSSQLSERVER ",
+                                            "/SQLSVCACCOUNT=\"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            "\" ",
+                                            "/SQLSVCPASSWORD=\"",
+                                            {
+                                                "Ref" : "SQLServiceAccountPassword"
+                                            },
+                                            "\" ",
+                                            "/AGTSVCACCOUNT=\"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            "\" ",
+                                            "/AGTSVCPASSWORD=\"",
+                                            {
+                                                "Ref" : "SQLServiceAccountPassword"
+                                            },
+                                            "\" ",
+                                            "/SQLSYSADMINACCOUNTS=\"",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            "\\",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            "\" ",
+                                            "/SQLUSERDBDIR=\"D:\\MSSQL\\DATA\" ",
+                                            "/SQLUSERDBLOGDIR=\"E:\\MSSQL\\LOG\" ",
+                                            "/SQLBACKUPDIR=\"D:\\MSSQL\\Backup\" ",
+                                            "/SQLTEMPDBDIR=\"F:\\MSSQL\\TempDB\" ",
+                                            "/SQLTEMPDBLOGDIR=\"F:\\MSSQL\\TempDB\" ",
+                                            "/IACCEPTSQLSERVERLICENSETERMS"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "commands" : {
+                            "a-execute-powershell-script-WSFC" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\WSFC.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "b-execute-powershell-script-DownloadSQLEE" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\ScriptDownloadSQLEE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "c-execute-powershell-DownloadSQLEE"        : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadSQLEE.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "d-execute-powershell-DownloadWSFCPorts"    : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\DownloadWSFCPorts.ps1"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "e-open-WSFC-ports"                         : {
+                                "command" : "C:\\cfn\\scripts\\OpenWSFCPorts.bat"
+                            },
+                            "f-execute-powershell-script-AddUserToGroup" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\AddUserToGroup.ps1 -UserName ",
+                                            {
+                                                "Ref" : "DomainAdminUser"
+                                            },
+                                            " -ServerName ",
+                                            {
+                                                "Ref" : "WSFCNode1NetBIOSName"
+                                            },
+                                            " -DomainNetBIOSName ",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            " -GroupName \"Administrators\"",
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+                            "g-execute-powershell-script-AddUserToGroup" : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "powershell.exe ",
+                                            "-ExecutionPolicy",
+                                            " Unrestricted",
+                                            " C:\\cfn\\scripts\\AddUserToGroup.ps1 -UserName ",
+                                            {
+                                                "Ref" : "SQLServiceAccount"
+                                            },
+                                            " -ServerName ",
+                                            {
+                                                "Ref" : "WSFCNode1NetBIOSName"
+                                            },
+                                            " -DomainNetBIOSName ",
+                                            {
+                                                "Ref" : "DomainNetBIOSName"
+                                            },
+                                            " -GroupName \"Administrators\"",
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "waitAfterCompletion" : "0"
+                            },
+							"h-enable-autologon" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
+									"\"New-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name AutoAdminLogon -Value 1 | out-null",
+									";",
+									"New-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name DefaultUserName -Value ", { "Ref" : "DomainAdminUser" }, "@", { "Ref" : "DomainDNSName" }, " | out-null",
+									";",
+									"New-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name DefaultPassword -Value ", { "Ref" : "DomainAdminPassword" }, " | out-null",
+									"\""
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"i-set-startup-script" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
+									"\"New-ItemProperty -Path HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce -Name InstallSQL -Value C:\\Users\\Default\\Desktop\\InstallSQLEE.bat | out-null",
+									"\""
+								]]},
+								"waitAfterCompletion" : "0"
+							},
+							"j-reboot" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
+									"Restart-Computer -Force"
+								]]},
+								"waitAfterCompletion" : "forever"
+							},
+							"k-wait-for-install" : {
+								"command" : { "Fn::Join" : [ "", [
+									"powershell.exe -ExecutionPolicy Unrestricted -Command ",
+									"Start-Sleep 30"
+								]]},
+								"waitAfterCompletion" : "0"
+							}
+                        }
+                    },
+                    "finalize"      : {
+                        "commands" : {
+                            "1-signal-success"                           : {
+                                "command" : {
+                                    "Fn::Join" : [
+                                        "",
+                                        [
+                                            "cfn-signal.exe -e %ERRORLEVEL% \"",
+                                            {
+                                                "Ref" : "WSFCNode2WaitHandle"
+                                            },
+                                            "\""
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : {
+                    "Fn::FindInMap" : [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref" : "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap" : [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Ref" : "WSFCNode2InstanceType"
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "InstanceType" : {
+                    "Ref" : "WSFCNode2InstanceType"
+                },
+                "SubnetId"     : {
+                    "Ref" : "WSFCNode2Subnet"
+                },
+                "EbsOptimized" : "true",
+                "PrivateIpAddress" : {
+                    "Ref" : "WSFCNode2PrivateIp"
+                },
+                "Tags"             : [
+                    {
+                        "Key" : "Name",
+                        "Value" : {
+                            "Ref" : "WSFCNode2NetBIOSName"
+                        }
+                    }
+                ],
+                "BlockDeviceMappings" : [
+                    {
+                        "DeviceName" : "/dev/sda1",
+                        "Ebs"        : {
+                            "VolumeSize" : "100"
+                        }
+                    },
+                    {
+                        "DeviceName" : "/dev/xvdb",
+                        "VirtualName" : "ephemeral0"
+                    },
+                    {
+                        "DeviceName" : "/dev/xvdc",
+                        "VirtualName" : "ephemeral1"
+                    }
+                ],
+                "Volumes"             : [
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode2Volume1"
+                        },
+                        "Device"   : "/dev/xvdf"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode2Volume2"
+                        },
+                        "Device"   : "/dev/xvdg"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode2Volume3"
+                        },
+                        "Device"   : "/dev/xvdh"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode2Volume4"
+                        },
+                        "Device"   : "/dev/xvdi"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode2Volume5"
+                        },
+                        "Device"   : "/dev/xvdj"
+                    },
+                    {
+                        "VolumeId" : {
+                            "Ref" : "WSFCNode2Volume6"
+                        },
+                        "Device"   : "/dev/xvdk"
+                    }
+                ],
+                "SecurityGroupIds"    : [
+                    {
+                        "Ref" : "DomainMemberSGID"
+                    },
+                    {
+                        "Ref" : "WSFCServerSecurityGroupID"
+                    }
+                ],
+                "KeyName"             : {
+                    "Ref" : "KeyPairName"
+                },
+                "UserData"            : {
+                    "Fn::Base64" : {
+                        "Fn::Join" : [
+                            "",
+                            [
+                                "<script>\n",
+                                "cfn-init.exe -v -c config -s ",
+                                {
+                                    "Ref" : "AWS::StackId"
+                                },
+                                " -r WSFCNode2 ",
+                                " --region ",
+                                {
+                                    "Ref" : "AWS::Region"
+                                },
+                                "\n",
+                                "</script>"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "WSFCNode1Volume1"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode1Volume2"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode1Volume3"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode1Volume4"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode1Volume5"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode1Volume6"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        0,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode2Volume1"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode2Volume2"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode2Volume3"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode2Volume4"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode2Volume5"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        },
+        "WSFCNode2Volume6"       : {
+            "Type" : "AWS::EC2::Volume",
+            "Properties" : {
+                "Size" : "200",
+                "Iops" : {
+                    "Ref" : "DiskProvisionedIOPS"
+                },
+                "VolumeType" : "io1",
+                "AvailabilityZone" : {
+                    "Fn::Select" : [
+                        1,
+                        {
+                            "Fn::GetAZs" : ""
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "Outputs"                  : {
+        "DomainAdmin" : {
+            "Value" : {
+                "Fn::Join" : [
+                    "",
+                    [
+                        {
+                            "Ref" : "DomainNetBIOSName"
+                        },
+                        "\\",
+                        {
+                            "Ref" : "DomainAdminUser"
+                        }
+                    ]
+                ]
+            },
+            "Description" : "Domain administrator account"
+        },
+        "LocalAdmin"  : {
+            "Value" : "Administrator",
+            "Description" : "Please retrieve Administrator password of the instance"
+        },
+        "WSFCNode1NetBIOSName" : {
+            "Value" : {
+                "Ref" : "WSFCNode1NetBIOSName"
+            },
+            "Description" : "NetBIOS name of the 1st WSFC Node"
+        },
+        "WSFCNode2NetBIOSName" : {
+            "Value" : {
+                "Ref" : "WSFCNode2NetBIOSName"
+            },
+            "Description" : "NetBIOS name of the 2nd WSFC Node"
+        }
+    }
+}
